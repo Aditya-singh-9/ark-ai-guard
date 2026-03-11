@@ -1,0 +1,52 @@
+# ARK DevSecOps AI — Git Ignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+*.whl
+.venv/
+venv/
+env/
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.tox/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Scan temp files
+/tmp/ark-scans/
+
+# Alembic
+alembic/versions/*.py
+!alembic/versions/.gitkeep
+
+# Trivy cache
+.trivy/
+trivy-cache/

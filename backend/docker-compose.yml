@@ -1,0 +1,107 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ARK DevSecOps AI — Docker Compose
+# Services: api (FastAPI), db (PostgreSQL 16), redis (future cache/queue)
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL Database ───────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: ark_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ark_db
+      POSTGRES_USER: ark_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-ark_pass_change_me}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ark_user -d ark_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - ark_network
+
+  # ── Redis (Future: Task Queue / Caching) ─────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: ark_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ark_network
+
+  # ── FastAPI Backend ───────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: ark_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override DATABASE_URL to use the Docker Compose service name
+      DATABASE_URL: postgresql://ark_user:${DB_PASSWORD:-ark_pass_change_me}@db:5432/ark_db
+      SCAN_TEMP_DIR: /tmp/ark-scans
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount scan temp dir as writable volume
+      - scan_temp:/tmp/ark-scans
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ark_network
+    labels:
+      - "com.ark.service=api"
+      - "com.ark.version=1.0.0"
+
+# ── Local Development Override ─────────────────────────────────────────────
+# Override with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# For hot-reload in dev, mount the source directory:
+#   volumes:
+#     - .:/app
+
+# ── Volumes ───────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  scan_temp:
+    driver: local
+
+# ── Networks ──────────────────────────────────────────────────────────────────
+networks:
+  ark_network:
+    driver: bridge
+    name: ark_network
