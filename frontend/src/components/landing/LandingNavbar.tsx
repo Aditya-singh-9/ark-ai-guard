@@ -3,10 +3,13 @@ import { Shield, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "@/contexts/AuthContext";
+import { githubOAuthUrl } from "@/lib/api";
 
 const LandingNavbar = () => {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const { user, logout } = useAuth();
 
   useEffect(() => {
     const handler = () => setScrolled(window.scrollY > 20);
@@ -47,9 +50,19 @@ const LandingNavbar = () => {
           <Link to="/dashboard">
             <Button variant="ghost" size="sm" className="font-medium">Dashboard</Button>
           </Link>
-          <Button size="sm" className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium neon-glow-sm">
-            Connect GitHub
-          </Button>
+          {user ? (
+            <Button size="sm" variant="outline" className="font-medium" onClick={logout}>
+              Logout ({user.username})
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium neon-glow-sm"
+              onClick={() => { window.location.href = githubOAuthUrl(); }}
+            >
+              Connect GitHub
+            </Button>
+          )}
         </div>
 
         {/* Mobile hamburger */}

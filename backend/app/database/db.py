@@ -19,14 +19,26 @@ class Base(DeclarativeBase):
 
 # ── Engine ────────────────────────────────────────────────────────────────────
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,       # Test connections before using from pool
-    pool_size=10,             # Maintained open connections
-    max_overflow=20,          # Extra connections beyond pool_size
-    pool_timeout=30,          # Seconds to wait for a connection
-    echo=settings.DEBUG,      # Log SQL in dev
-)
+_is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+
+if _is_sqlite:
+    # SQLite: use StaticPool for thread safety with check_same_thread=False
+    from sqlalchemy.pool import StaticPool
+    engine = create_engine(
+        settings.DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        echo=settings.DEBUG,
+    )
+else:
+    engine = create_engine(
+        settings.DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=10,
+        max_overflow=20,
+        pool_timeout=30,
+        echo=settings.DEBUG,
+    )
 
 
 # ── Session Factory ───────────────────────────────────────────────────────────

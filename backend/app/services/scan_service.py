@@ -17,6 +17,7 @@ from app.services.cicd_generator import generate_cicd_pipeline
 from app.security.semgrep_runner import run_semgrep
 from app.security.bandit_runner import run_bandit
 from app.security.trivy_runner import run_trivy
+from app.security.native_scanner import run_native_scanner
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -105,18 +106,21 @@ async def run_full_scan(
         # ── Step 3: Run Security Scanners ────────────────────────────────
         log.info(f"[Scan {scan_id}] Running security scanners…")
 
-        # Note: These are synchronous subprocess calls.
-        # In a production system, you'd use asyncio.gather with run_in_executor.
+        # Native scanner always runs first (no external tools required)
+        native_findings = run_native_scanner(clone_path)
+
+        # Semgrep and Bandit run if installed (best-effort)
         semgrep_findings = run_semgrep(clone_path)
         bandit_findings = run_bandit(clone_path)
         trivy_findings = run_trivy(clone_path)
 
         all_findings: list[dict[str, Any]] = (
-            semgrep_findings + bandit_findings + trivy_findings
+            native_findings + semgrep_findings + bandit_findings + trivy_findings
         )
 
         log.info(
             f"[Scan {scan_id}] Raw findings — "
+            f"Native: {len(native_findings)}, "
             f"Semgrep: {len(semgrep_findings)}, "
             f"Bandit: {len(bandit_findings)}, "
             f"Trivy: {len(trivy_findings)}"

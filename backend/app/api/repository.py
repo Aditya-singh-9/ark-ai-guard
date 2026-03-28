@@ -7,6 +7,7 @@ Endpoints:
   GET    /repositories/{repo_id}   Get a single repository
   DELETE /repositories/{repo_id}   Remove a repository connection
 """
+from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, HttpUrl, field_validator
@@ -50,7 +51,7 @@ class RepositoryResponse(BaseModel):
     description: Optional[str]
     is_private: bool
     total_scans: int
-    last_scanned_at: Optional[str]
+    last_scanned_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

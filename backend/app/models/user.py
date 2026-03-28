@@ -1,9 +1,10 @@
 """
 User model — stores GitHub OAuth user data.
+SQLite-compatible: uses Integer instead of BigInteger.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, BigInteger, DateTime, Text, func
+from sqlalchemy import String, Integer, DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.db import Base
 
@@ -11,8 +12,8 @@ from app.database.db import Base
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    github_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    github_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -21,17 +22,14 @@ class User(Base):
     # Encrypted GitHub access token (Fernet encrypted, stored as text)
     access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, server_default=func.now(), nullable=True
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now(), nullable=True
     )
     last_login_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
+        DateTime, nullable=True
     )
 
     # Relationships

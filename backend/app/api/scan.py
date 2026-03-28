@@ -36,17 +36,38 @@ class ScanStatusResponse(BaseModel):
     scan_id: int
     repository_id: int
     status: str
-    security_score: Optional[float]
-    total_vulnerabilities: int
-    critical_count: int
-    high_count: int
-    medium_count: int
-    low_count: int
-    detected_language: Optional[str]
-    scan_time: datetime
-    completed_at: Optional[datetime]
-    duration_seconds: Optional[float]
-    error_message: Optional[str]
+    security_score: Optional[float] = None
+    total_vulnerabilities: int = 0
+    critical_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    low_count: int = 0
+    detected_language: Optional[str] = None
+    scan_time: Optional[str] = None
+    completed_at: Optional[str] = None
+    duration_seconds: Optional[float] = None
+    error_message: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+    @classmethod
+    def from_orm_scan(cls, scan: "ScanReport") -> "ScanStatusResponse":
+        return cls(
+            scan_id=scan.id,
+            repository_id=scan.repository_id,
+            status=scan.status.value if hasattr(scan.status, "value") else str(scan.status),
+            security_score=scan.security_score,
+            total_vulnerabilities=scan.total_vulnerabilities,
+            critical_count=scan.critical_count,
+            high_count=scan.high_count,
+            medium_count=scan.medium_count,
+            low_count=scan.low_count,
+            detected_language=scan.detected_language,
+            scan_time=scan.scan_time.isoformat() if scan.scan_time else None,
+            completed_at=scan.completed_at.isoformat() if scan.completed_at else None,
+            duration_seconds=scan.duration_seconds,
+            error_message=scan.error_message,
+        )
 
 
 class ScanInitiatedResponse(BaseModel):
@@ -163,14 +184,13 @@ def initiate_scan(
 
 @router.get(
     "/scan-results/{repo_id}",
-    response_model=ScanStatusResponse,
     summary="Get Latest Scan Results",
 )
 def get_scan_results(
     repo_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> ScanReport:
+) -> dict:
     """
     Return the most recent scan report for the given repository.
     """
@@ -193,19 +213,18 @@ def get_scan_results(
             status_code=404,
             detail="No scans found for this repository. Run POST /scan-repository first.",
         )
-    return scan
+    return ScanStatusResponse.from_orm_scan(scan).model_dump()
 
 
 @router.get(
     "/scans/{scan_id}/status",
-    response_model=ScanStatusResponse,
     summary="Poll Scan Status",
 )
 def get_scan_status(
     scan_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> ScanReport:
+) -> dict:
     """
     Poll a specific scan's status. Use this for real-time progress updates.
     """
@@ -217,7 +236,7 @@ def get_scan_status(
     )
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return scan
+    return ScanStatusResponse.from_orm_scan(scan).model_dump()
 
 
 @router.get(

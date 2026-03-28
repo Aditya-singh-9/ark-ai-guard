@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import { Shield, GitBranch, Zap, ArrowRight, Lock, Server, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import { githubOAuthUrl } from "@/lib/api";
 
 const terminalLines = [
   { text: "$ ark scan --repo github.com/myorg/app --deep", color: "text-neon-green" },
@@ -75,6 +76,7 @@ const HeroSection = () => {
               <Button
                 size="lg"
                 className="bg-primary text-primary-foreground hover:bg-primary/90 neon-glow font-semibold px-8 h-12 text-base gap-2"
+                onClick={() => { window.location.href = githubOAuthUrl(); }}
               >
                 <GitBranch className="w-5 h-5" />
                 Connect GitHub

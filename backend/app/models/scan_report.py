@@ -1,9 +1,10 @@
 """
 ScanReport model — represents one complete security scan of a repository.
+SQLite-compatible: uses Integer instead of BigInteger.
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, BigInteger, DateTime, Text, Float, Integer, ForeignKey, func, Enum
+from sqlalchemy import String, Integer, DateTime, Text, Float, ForeignKey, func, Enum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 from app.database.db import Base
@@ -19,11 +20,11 @@ class ScanStatus(str, enum.Enum):
 class ScanReport(Base):
     __tablename__ = "scan_reports"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # Foreign key to repository
     repository_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("repositories.id", ondelete="CASCADE"),
+        Integer, ForeignKey("repositories.id", ondelete="CASCADE"),
         nullable=False, index=True
     )
 
@@ -31,12 +32,10 @@ class ScanReport(Base):
     status: Mapped[ScanStatus] = mapped_column(
         Enum(ScanStatus), default=ScanStatus.PENDING, nullable=False
     )
-    scan_time: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+    scan_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, server_default=func.now(), nullable=True
     )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     duration_seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
     # Vulnerability counts
@@ -72,8 +71,7 @@ class ScanReport(Base):
     def compute_security_score(self) -> float:
         """
         Calculate security score 0–100.
-        Deduct: critical*15, high*7, medium*3, low*1
-        Floor at 0.
+        Deduct: critical*15, high*7, medium*3, low*1. Floor at 0.
         """
         deduction = (
             self.critical_count * 15
