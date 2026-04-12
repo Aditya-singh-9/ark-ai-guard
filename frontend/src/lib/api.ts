@@ -23,9 +23,6 @@ const getRedirectUri = () => `${window.location.origin}/auth/callback`;
 export const githubOAuthUrl = () =>
   `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(getRedirectUri())}&scope=repo,user:email`;
 
-export const getApiBase = () => API_BASE;
-
-
 // ── Fetch wrapper ─────────────────────────────────────────────────────────────
 
 async function request<T>(
