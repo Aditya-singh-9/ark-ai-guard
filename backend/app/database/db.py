@@ -85,21 +85,23 @@ def init_db() -> None:
     
     # Auto-patch missing auth columns for legacy schema
     try:
-        with engine.begin() as conn:
-            # We catch exceptions internally if columns already exist
-            try:
+        from sqlalchemy import inspect
+        inspector = inspect(engine)
+        columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        with engine.connect() as conn:
+            if 'auth_provider' not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN auth_provider VARCHAR(50)"))
                 conn.execute(text("UPDATE users SET auth_provider = 'github' WHERE auth_provider IS NULL"))
-            except Exception:
-                pass
-            
-            try:
+                conn.commit()
+                log.info("Patched missing auth_provider column.")
+                
+            if 'password_hash' not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
-            except Exception:
-                pass
-        log.info("Schema integrity verified ✓")
+                conn.commit()
+                log.info("Patched missing password_hash column.")
     except Exception as e:
-        log.warning(f"Schema patch warning (can be ignored if columns exist): {e}")
+        log.error(f"Failed to auto-patch schema: {e}")
 
     log.info("Database ready ✓")
 
