@@ -50,7 +50,7 @@ const PlatformPreview = () => {
               <div className="w-48 border-r border-border/40 p-3 flex-shrink-0" style={{ background: "hsl(var(--sidebar-background))" }}>
                 <div className="flex items-center gap-2 mb-5 px-2">
                   <Shield className="w-4 h-4 text-primary" />
-                  <span className="text-xs font-bold">ARK DevSecOps</span>
+                  <span className="text-xs font-bold">DevScops Guard</span>
                 </div>
                 {[
                   { icon: TrendingUp, label: "Dashboard", active: true },

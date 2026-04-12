@@ -1,5 +1,5 @@
 /**
- * Central API client for ARK DevSecOps AI backend.
+ * Central API client for DevScops Guard backend.
  * Reads VITE_API_URL from env. Attaches JWT Bearer token automatically.
  */
 

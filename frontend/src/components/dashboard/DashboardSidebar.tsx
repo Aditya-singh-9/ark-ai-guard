@@ -151,7 +151,7 @@ const DashboardSidebar = () => {
                 <Shield className="w-4 h-4 text-primary" />
               </div>
               <div className="truncate">
-                <p className="text-sm font-bold tracking-tight leading-tight gradient-text">ARK DevSecOps</p>
+                <p className="text-sm font-bold tracking-tight leading-tight gradient-text">DevScops Guard</p>
                 <p className="text-[10px] text-muted-foreground font-mono leading-tight">AI Platform v2</p>
               </div>
             </motion.div>

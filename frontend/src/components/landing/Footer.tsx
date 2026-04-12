@@ -11,7 +11,7 @@ const Footer = () => (
             <div className="w-8 h-8 rounded-lg bg-primary/20 flex items-center justify-center">
               <Shield className="w-4 h-4 text-primary" />
             </div>
-            <span className="font-bold text-lg">ARK DevSecOps AI</span>
+            <span className="font-bold text-lg">DevScops Guard</span>
           </Link>
           <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
             Open-source DevSecOps platform powered by AI. Secure your code, automatically.
@@ -72,7 +72,7 @@ const Footer = () => (
 
       {/* Bottom bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between pt-8 border-t border-border/40 gap-4 text-xs text-muted-foreground">
-        <span>© 2026 ARK DevSecOps AI. Built with ♥ for the developer community.</span>
+        <span>© 2026 DevScops Guard. Built with ♥ for the developer community.</span>
         <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-primary/5 border border-primary/10">
           <Shield className="w-3 h-3 text-primary" />
           <span className="text-primary font-medium font-mono">Open Source · Free to Use</span>

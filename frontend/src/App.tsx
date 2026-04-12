@@ -21,6 +21,9 @@ import AuthCallback from "./pages/AuthCallback.tsx";
 import CompliancePage from "./pages/CompliancePage.tsx";
 import ThreatAnalysisPage from "./pages/ThreatAnalysisPage.tsx";
 import PolicyPage from "./pages/PolicyPage.tsx";
+import LoginPage from "./pages/LoginPage.tsx";
+import RegisterPage from "./pages/RegisterPage.tsx";
+import ManualScanPage from "./pages/ManualScanPage.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,9 +56,15 @@ const App = () => (
               <Route path="compliance" element={<CompliancePage />} />
               <Route path="threats" element={<ThreatAnalysisPage />} />
               <Route path="policy" element={<PolicyPage />} />
+            <Route path="login" element={<LoginPage />} />
+              <Route path="register" element={<RegisterPage />} />
+              <Route path="manual-scan" element={<ManualScanPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="profile" element={<ProfilePage />} />
             </Route>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/manual-scan" element={<ManualScanPage />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

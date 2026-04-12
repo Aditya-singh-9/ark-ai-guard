@@ -31,7 +31,7 @@ const OnboardingCard = () => (
         <Rocket className="w-8 h-8 text-primary" />
       </div>
 
-      <h2 className="text-xl font-bold mb-2">Welcome to ARK DevSecOps AI</h2>
+      <h2 className="text-xl font-bold mb-2">Welcome to DevScops Guard</h2>
       <p className="text-sm text-muted-foreground max-w-md mx-auto mb-8">
         Connect your first GitHub repository to start scanning for vulnerabilities,
         get AI-powered security recommendations, and auto-generate hardened CI/CD pipelines.
