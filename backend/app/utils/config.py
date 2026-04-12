@@ -64,15 +64,26 @@ class Settings(BaseSettings):
 
     @property
     def allowed_origins_list(self) -> list[str]:
-        """Parse ALLOWED_ORIGINS from either comma-separated or JSON array string."""
+        """Parse ALLOWED_ORIGINS from either comma-separated or JSON array string.
+        Always includes hardcoded production origins as a guaranteed fallback."""
         import json
+        # Always-allowed production origins
+        production = [
+            "https://www.devscops.xyz",
+            "https://devscops.xyz",
+            "https://ark-ai-guard.vercel.app",
+            "http://localhost:5173",
+            "http://localhost:8080",
+        ]
         val = self.ALLOWED_ORIGINS.strip()
         if val.startswith("["):
             try:
-                return json.loads(val)
+                parsed = json.loads(val)
             except json.JSONDecodeError:
-                pass
-        return [o.strip() for o in val.split(",") if o.strip()]
+                parsed = []
+        else:
+            parsed = [o.strip() for o in val.split(",") if o.strip()]
+        return list(set(parsed + production))
 
     # ── Rate Limiting ─────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 60

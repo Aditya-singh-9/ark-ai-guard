@@ -1,10 +1,12 @@
 """
-Authentication router — GitHub OAuth + JWT issuance.
+Authentication router — GitHub OAuth + JWT issuance + Email/Password auth.
 
 Endpoints:
   POST /auth/github        Exchange GitHub OAuth code for a JWT
+  POST /auth/register      Register with email + password
+  POST /auth/login         Login with email + password
   GET  /auth/me            Return current user profile
-  POST /auth/logout        (Stateless: frontend discards token)
+  POST /auth/logout        Revoke JWT (server-side denylist)
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -45,12 +47,25 @@ class TokenResponse(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    github_id: int
+    github_id: Optional[int] = None
     username: str
     email: Optional[str]
     display_name: Optional[str]
     avatar_url: Optional[str]
+    auth_provider: str = "github"
     created_at: datetime
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class EmailLoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 # ── JWT Helpers ────────────────────────────────────────────────────────────────
@@ -256,3 +271,108 @@ async def logout(
         except Exception:
             pass  # Malformed token — still return success
     return {"message": "Logged out successfully. Token has been revoked."}
+
+
+# ── Email / Password Auth ─────────────────────────────────────────────────────
+
+@router.post("/register", response_model=TokenResponse, summary="Register with Email/Password")
+@limiter.limit("5/minute")
+async def register(
+    request: Request,
+    body: RegisterRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Register a new account with email and password."""
+    from passlib.context import CryptContext
+    import re
+
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+    # Basic validation
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    if not re.match(r'^[\w.@+-]+$', body.username):
+        raise HTTPException(status_code=400, detail="Username contains invalid characters.")
+
+    # Check uniqueness
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=409, detail="Username is already taken.")
+
+    user = User(
+        github_id=None,
+        username=body.username,
+        email=body.email,
+        display_name=body.display_name or body.username,
+        avatar_url=None,
+        auth_provider="email",
+        password_hash=pwd_ctx.hash(body.password),
+        last_login_at=datetime.now(timezone.utc),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    log.info(f"New email user registered: {user.username}")
+    jwt_token = create_access_token({"sub": str(user.id), "username": user.username})
+
+    return {
+        "access_token": jwt_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": user.id,
+            "github_id": None,
+            "username": user.username,
+            "email": user.email,
+            "display_name": user.display_name,
+            "avatar_url": None,
+            "auth_provider": "email",
+        },
+    }
+
+
+@router.post("/login", response_model=TokenResponse, summary="Login with Email/Password")
+@limiter.limit("10/minute")
+async def email_login(
+    request: Request,
+    body: EmailLoginRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Authenticate with email and password."""
+    from passlib.context import CryptContext
+
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+    user = db.query(User).filter(
+        User.email == body.email,
+        User.auth_provider == "email",
+    ).first()
+
+    if not user or not user.password_hash or not pwd_ctx.verify(body.password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
+    log.info(f"Email user logged in: {user.username}")
+    jwt_token = create_access_token({"sub": str(user.id), "username": user.username})
+
+    return {
+        "access_token": jwt_token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": user.id,
+            "github_id": None,
+            "username": user.username,
+            "email": user.email,
+            "display_name": user.display_name,
+            "avatar_url": user.avatar_url,
+            "auth_provider": "email",
+        },
+    }

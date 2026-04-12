@@ -1,5 +1,5 @@
 """
-User model — stores GitHub OAuth user data.
+User model — stores GitHub OAuth user data + optional email/password auth.
 SQLite-compatible: uses Integer instead of BigInteger.
 """
 from datetime import datetime
@@ -13,11 +13,18 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    github_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
+    # GitHub ID — nullable for email/password users
+    github_id: Mapped[Optional[int]] = mapped_column(BigInteger, unique=True, nullable=True, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Auth provider: "github" or "email"
+    auth_provider: Mapped[str] = mapped_column(String(20), default="github", nullable=False)
+
+    # Email/password auth (nullable — only set for email/password users)
+    password_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Encrypted GitHub access token (Fernet encrypted, stored as text)
     access_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -38,4 +45,4 @@ class User(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<User id={self.id} username={self.username!r}>"
+        return f"<User id={self.id} username={self.username!r} provider={self.auth_provider!r}>"
