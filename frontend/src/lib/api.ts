@@ -15,11 +15,16 @@ export const removeToken = (): void => localStorage.removeItem(TOKEN_KEY);
 
 // ── GitHub OAuth URL ──────────────────────────────────────────────────────────
 
-const GITHUB_CLIENT_ID = "Ov23li7v3bY1iFPfBHxp";
-const GITHUB_REDIRECT_URI = "http://localhost:8080/auth/callback";
+const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID ?? "Ov23li7v3bY1iFPfBHxp";
+
+// Dynamically use the current domain — works on localhost, Vercel, and custom domains
+const getRedirectUri = () => `${window.location.origin}/auth/callback`;
 
 export const githubOAuthUrl = () =>
-  `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(GITHUB_REDIRECT_URI)}&scope=repo,user:email`;
+  `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(getRedirectUri())}&scope=repo,user:email`;
+
+export const getApiBase = () => API_BASE;
+
 
 // ── Fetch wrapper ─────────────────────────────────────────────────────────────
 
