@@ -50,3 +50,37 @@ alembic/versions/*.py
 # Trivy cache
 .trivy/
 trivy-cache/
+
+# Debug output files (never commit)
+out.txt
+out_api.txt
+out_github.txt
+out_list.txt
+out_*.txt
+
+# SQLite database files (use PostgreSQL in production)
+*.db
+*.sqlite
+*.sqlite3
+
+# ML Model weights (too large for git — use DVC or download script)
+ark_ml/*.gguf
+ark_ml/*.bin
+ark_ml/*.safetensors
+ark_ml/mythos_training.jsonl
+
+# Embedded Python distribution (for local dev only)
+python311/
+python-*.zip
+
+# Scratch / one-off test scripts in root
+check_db.py
+migrate_db.py
+test_api.py
+test_conn.py
+test_db.py
+test_db2.py
+test_github.py
+test_list.py
+test_local.py
+test_mythos.py

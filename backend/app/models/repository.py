@@ -4,7 +4,7 @@ SQLite-compatible: uses Integer instead of BigInteger.
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, DateTime, Text, ForeignKey, Boolean, func
+from sqlalchemy import String, Integer, BigInteger, DateTime, Text, ForeignKey, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.db import Base
 
@@ -15,7 +15,7 @@ class Repository(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
 
     # GitHub metadata
-    github_repo_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    github_repo_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     owner: Mapped[str] = mapped_column(String(100), nullable=False)
     full_name: Mapped[str] = mapped_column(String(300), nullable=False)  # owner/name

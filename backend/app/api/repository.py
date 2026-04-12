@@ -6,16 +6,18 @@ Endpoints:
   GET    /repositories              List user's connected repositories
   GET    /repositories/{repo_id}   Get a single repository
   DELETE /repositories/{repo_id}   Remove a repository connection
+  GET    /github/repos              List all GitHub repos for auto-import
 """
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, HttpUrl, field_validator
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.auth import get_current_user, get_decrypted_token
 from app.database.db import get_db
 from app.models.repository import Repository
+from app.models.scan_report import ScanReport, ScanStatus as ScanStatusEnum
 from app.models.user import User
 from app.services import github_service
 from app.utils.logger import get_logger
@@ -52,6 +54,10 @@ class RepositoryResponse(BaseModel):
     is_private: bool
     total_scans: int
     last_scanned_at: Optional[datetime] = None
+    # Enriched from latest scan — computed at serialization time
+    security_score: Optional[float] = None
+    scan_status: Optional[str] = None
+    latest_scan_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -149,6 +155,46 @@ async def connect_repository(
     return repository
 
 
+class GitHubRepoItem(BaseModel):
+    id: int
+    full_name: str
+    description: Optional[str]
+    language: Optional[str]
+    is_private: bool
+    html_url: str
+    updated_at: Optional[str]
+
+
+@router.get(
+    "/github/repos",
+    response_model=list[GitHubRepoItem],
+    summary="List GitHub Repositories for Auto-Import",
+)
+async def list_github_repos(
+    current_user: User = Depends(get_current_user),
+) -> list[dict]:
+    """Return all GitHub repos accessible to the authenticated user for quick import."""
+    gh_token = get_decrypted_token(current_user)
+    if not gh_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No GitHub token. Please re-authenticate.",
+        )
+    raw = await github_service.list_user_repositories(gh_token, per_page=100)
+    return [
+        {
+            "id": r["id"],
+            "full_name": r["full_name"],
+            "description": r.get("description"),
+            "language": r.get("language"),
+            "is_private": r.get("private", False),
+            "html_url": r["html_url"],
+            "updated_at": r.get("updated_at"),
+        }
+        for r in raw
+    ]
+
+
 @router.get(
     "/repositories",
     response_model=list[RepositoryResponse],
@@ -157,15 +203,40 @@ async def connect_repository(
 def list_repositories(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-) -> list[Repository]:
-    """Return all repositories connected by the authenticated user."""
+) -> list[dict]:
+    """Return all repositories connected by the authenticated user, enriched with latest scan info."""
     repos = (
         db.query(Repository)
         .filter(Repository.user_id == current_user.id)
         .order_by(Repository.id.desc())
         .all()
     )
-    return repos
+    result = []
+    for repo in repos:
+        # Get the latest completed scan for enrichment
+        latest_scan = (
+            db.query(ScanReport)
+            .filter(ScanReport.repository_id == repo.id)
+            .order_by(ScanReport.id.desc())
+            .first()
+        )
+        item = {
+            "id": repo.id,
+            "name": repo.name,
+            "owner": repo.owner,
+            "full_name": repo.full_name,
+            "url": repo.url,
+            "language": repo.language,
+            "description": repo.description,
+            "is_private": repo.is_private,
+            "total_scans": repo.total_scans or 0,
+            "last_scanned_at": repo.last_scanned_at,
+            "security_score": latest_scan.security_score if latest_scan else None,
+            "scan_status": latest_scan.status.value if latest_scan else "never_scanned",
+            "latest_scan_id": latest_scan.id if latest_scan else None,
+        }
+        result.append(item)
+    return result
 
 
 @router.get(

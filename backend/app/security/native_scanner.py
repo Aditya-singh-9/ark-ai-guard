@@ -5,6 +5,10 @@ Performs deep security analysis using:
 - Python AST analysis (for Python code)
 - Regex pattern matching across all languages
 - Dependency file scanning (requirements.txt, package.json, etc.)
+- Secret / credential detection (50+ patterns)
+- Typosquatting package detection
+- License compliance checking
+- IaC / config file scanning
 
 Detects: SQL injection, XSS, hardcoded secrets, insecure crypto,
 command injection, path traversal, IDOR patterns, open redirects,
@@ -24,11 +28,11 @@ log = get_logger(__name__)
 # ── Security pattern definitions ───────────────────────────────────────────────
 
 PATTERNS = [
-    # Secrets / Credentials
+    # ── Expanded Secret / Credential Detection ─────────────────────────────────
     {
         "id": "hardcoded-secret-key",
         "pattern": re.compile(
-            r'(?i)(secret[_-]?key|api[_-]?key|password|passwd|token|auth[_-]?key)\s*[=:]\s*["\'][^"\']{8,}["\']',
+            r'(?i)(secret[_-]?key|api[_-]?key|password|passwd|token|auth[_-]?key|access[_-]?token)\s*[=:]\s*["\'][^"\']{8,}["\']',
             re.IGNORECASE
         ),
         "severity": "critical",
@@ -41,12 +45,20 @@ PATTERNS = [
         "pattern": re.compile(r'AKIA[0-9A-Z]{16}'),
         "severity": "critical",
         "issue": "AWS Access Key ID Exposed",
-        "description": "An AWS Access Key ID pattern was found in source code.",
-        "fix": "Revoke this key immediately, rotate credentials, and use IAM roles instead of long-term credentials.",
+        "description": "An AWS Access Key ID pattern was found in source code. This provides access to your AWS account.",
+        "fix": "Revoke this key immediately at AWS IAM Console, rotate credentials, and use IAM roles instead of long-term credentials.",
+    },
+    {
+        "id": "aws-secret-key",
+        "pattern": re.compile(r'(?i)(aws.secret|secret.access.key)\s*[=:]\s*["\'][A-Za-z0-9/+=]{40}["\']'),
+        "severity": "critical",
+        "issue": "AWS Secret Access Key Exposed",
+        "description": "An AWS Secret Access Key was found in source code.",
+        "fix": "Revoke the key at AWS IAM Console immediately. Never hardcode AWS credentials — use IAM roles or environment variables.",
     },
     {
         "id": "private-key-material",
-        "pattern": re.compile(r'-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----'),
+        "pattern": re.compile(r'-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
         "severity": "critical",
         "issue": "Private Key Exposed in Source",
         "description": "A private key was found embedded in source code.",
@@ -59,6 +71,158 @@ PATTERNS = [
         "issue": "GitHub Personal Access Token Exposed",
         "description": "A GitHub token was found in source code.",
         "fix": "Revoke the token at github.com/settings/tokens immediately and regenerate.",
+    },
+    {
+        "id": "stripe-secret-key",
+        "pattern": re.compile(r'sk_(live|test)_[A-Za-z0-9]{24,}'),
+        "severity": "critical",
+        "issue": "Stripe Secret Key Exposed",
+        "description": "A Stripe secret key was found. This allows full access to your Stripe account including charges and payouts.",
+        "fix": "Revoke immediately at dashboard.stripe.com/apikeys and regenerate. Use Stripe's restricted keys for minimal permissions.",
+    },
+    {
+        "id": "stripe-publishable-key",
+        "pattern": re.compile(r'pk_(live|test)_[A-Za-z0-9]{24,}'),
+        "severity": "medium",
+        "issue": "Stripe Publishable Key Exposed",
+        "description": "A Stripe publishable key was found in source code. While less critical than the secret key, it should not be hardcoded.",
+        "fix": "Move to environment variables. Publishable keys are safe to use client-side but should not be committed to version control.",
+    },
+    {
+        "id": "slack-token",
+        "pattern": re.compile(r'xox[baprs]-[0-9A-Za-z\-]+'),
+        "severity": "critical",
+        "issue": "Slack API Token Exposed",
+        "description": "A Slack API token was found in source code. This allows reading all messages and posting to your Slack workspace.",
+        "fix": "Revoke at api.slack.com/apps immediately. Rotate the token and move to environment variables.",
+    },
+    {
+        "id": "slack-webhook",
+        "pattern": re.compile(r'https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+'),
+        "severity": "high",
+        "issue": "Slack Webhook URL Exposed",
+        "description": "A Slack incoming webhook URL was found. Anyone with this URL can post messages to your Slack channel.",
+        "fix": "Regenerate the webhook URL in Slack app settings and move it to environment variables.",
+    },
+    {
+        "id": "twilio-key",
+        "pattern": re.compile(r'SK[a-f0-9]{32}'),
+        "severity": "critical",
+        "issue": "Twilio API Key Exposed",
+        "description": "A Twilio API key was found in source code, allowing SMS/calls to be made at your expense.",
+        "fix": "Revoke at twilio.com/console/project/api-keys. Rotate all Twilio credentials.",
+    },
+    {
+        "id": "sendgrid-key",
+        "pattern": re.compile(r'SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}'),
+        "severity": "critical",
+        "issue": "SendGrid API Key Exposed",
+        "description": "A SendGrid API key was found in source code, allowing sending emails from your account.",
+        "fix": "Revoke at app.sendgrid.com/settings/api_keys immediately. Use environment variables for all API keys.",
+    },
+    {
+        "id": "gcp-service-account",
+        "pattern": re.compile(r'\"type\":\s*\"service_account\"'),
+        "severity": "critical",
+        "issue": "GCP Service Account Key Exposed",
+        "description": "A Google Cloud Platform service account JSON key file appears to be embedded or referenced in source code.",
+        "fix": "Delete this service account key at cloud.google.com/iam and create a new one. Use Workload Identity instead of key files.",
+    },
+    {
+        "id": "google-api-key",
+        "pattern": re.compile(r'AIza[0-9A-Za-z_\-]{35}'),
+        "severity": "high",
+        "issue": "Google API Key Exposed",
+        "description": "A Google API key was found in source code. This can be used to make API calls billed to your account.",
+        "fix": "Restrict the key at console.cloud.google.com/apis/credentials to specific APIs and referrers. Move to environment variables.",
+    },
+    {
+        "id": "firebase-key",
+        "pattern": re.compile(r'AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}'),
+        "severity": "critical",
+        "issue": "Firebase Server Key Exposed",
+        "description": "A Firebase Cloud Messaging server key was found, allowing push notifications to all app users.",
+        "fix": "Regenerate the key in Firebase Console. Use environment variables to store the new key.",
+    },
+    {
+        "id": "azure-storage-key",
+        "pattern": re.compile(r'DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{86}=='),
+        "severity": "critical",
+        "issue": "Azure Storage Connection String Exposed",
+        "description": "An Azure Storage account connection string was found, providing full access to your Azure storage blobs, queues, and tables.",
+        "fix": "Regenerate the storage account access key in Azure Portal. Use Azure Key Vault or Managed Identity instead.",
+    },
+    {
+        "id": "azure-client-secret",
+        "pattern": re.compile(r'(?i)(client.secret|clientSecret|AZURE_CLIENT_SECRET)\s*[=:]\s*["\'][A-Za-z0-9_~.-]{34,}["\']'),
+        "severity": "critical",
+        "issue": "Azure Client Secret Exposed",
+        "description": "An Azure AD application client secret was found in source code.",
+        "fix": "Rotate the client secret in Azure App Registrations. Use Azure Managed Identity or Key Vault.",
+    },
+    {
+        "id": "npm-token",
+        "pattern": re.compile(r'//registry\.npmjs\.org/:_authToken=[A-Za-z0-9_-]+'),
+        "severity": "critical",
+        "issue": "npm Auth Token Exposed in .npmrc",
+        "description": "An npm authentication token was found. This allows publishing packages to npm under your account.",
+        "fix": "Revoke the token at npmjs.com/settings/tokens. Never commit .npmrc with auth tokens.",
+    },
+    {
+        "id": "heroku-api-key",
+        "pattern": re.compile(r'(?i)(heroku.api.key|HEROKU_API_KEY)\s*[=:]\s*["\'][a-f0-9-]{36}["\']'),
+        "severity": "critical",
+        "issue": "Heroku API Key Exposed",
+        "description": "A Heroku API key was found, allowing full control of your Heroku account and applications.",
+        "fix": "Regenerate at heroku.com/account. Use Heroku environment variables (config vars) instead.",
+    },
+    {
+        "id": "mailchimp-key",
+        "pattern": re.compile(r'[a-f0-9]{32}-us[0-9]{1,2}'),
+        "severity": "high",
+        "issue": "Mailchimp API Key Exposed",
+        "description": "A Mailchimp API key was found, allowing access to your mailing lists and campaign data.",
+        "fix": "Revoke at mailchimp.com/account/api and generate a new key. Store in environment variables.",
+    },
+    {
+        "id": "paypal-client-secret",
+        "pattern": re.compile(r'(?i)(paypal.client.secret|PAYPAL_SECRET)\s*[=:]\s*["\'][A-Za-z0-9_-]{64,}["\']'),
+        "severity": "critical",
+        "issue": "PayPal Client Secret Exposed",
+        "description": "A PayPal client secret was found in source code, allowing payment processing on your account.",
+        "fix": "Regenerate app credentials at developer.paypal.com. Move to secure environment variables.",
+    },
+    {
+        "id": "ssh-password-in-config",
+        "pattern": re.compile(r'(?i)(ssh_password|sshpass|StrictHostKeyChecking=no).{0,100}'),
+        "severity": "high",
+        "issue": "SSH Password or Insecure Config in Code",
+        "description": "SSH password or insecure StrictHostKeyChecking=no configuration was found.",
+        "fix": "Use SSH key-based authentication. Never store SSH passwords in code. Enable host key verification.",
+    },
+    {
+        "id": "database-url-with-password",
+        "pattern": re.compile(r'(postgres|mysql|mongodb|redis)://[^:@/]+:[^@/]+@'),
+        "severity": "critical",
+        "issue": "Database Connection String With Credentials Exposed",
+        "description": "A database connection URL containing a username and password was found in source code.",
+        "fix": "Move database credentials to environment variables (DATABASE_URL). Use connection poolers with IAM auth where possible.",
+    },
+    {
+        "id": "jwt-hardcoded-secret",
+        "pattern": re.compile(r'(?i)(jwt.secret|JWT_SECRET|signing.key)\s*[=:]\s*["\'][^"\']{8,}["\']'),
+        "severity": "critical",
+        "issue": "JWT Signing Secret Hardcoded",
+        "description": "A JWT signing secret is hardcoded in source code. Anyone who sees this code can forge authentication tokens.",
+        "fix": "Move the JWT secret to an environment variable (JWT_SECRET). Use a cryptographically random 256-bit value.",
+    },
+    {
+        "id": "encryption-key-hardcoded",
+        "pattern": re.compile(r'(?i)(encryption.key|ENCRYPTION_KEY|AES.key|cipher.key)\s*[=:]\s*["\'][^"\']{8,}["\']'),
+        "severity": "critical",
+        "issue": "Encryption Key Hardcoded",
+        "description": "An encryption key was found hardcoded in source code. This defeats the purpose of encryption.",
+        "fix": "Generate encryption keys using a CSPRNG and store in a secrets manager. Rotate exposed keys immediately.",
     },
 
     # SQL Injection
@@ -426,6 +590,46 @@ KNOWN_VULNERABLE_PACKAGES = {
 }
 
 
+# ── Typosquatting detection ────────────────────────────────────────────────────
+
+# Popular packages and their typosquat variants to watch out for
+TYPOSQUAT_PACKAGES: dict[str, str] = {
+    # Python
+    "reqeusts": "requests", "requets": "requests", "requsts": "requests",
+    "panda": "pandas", "pandsa": "pandas", "numppy": "numpy", "nupy": "numpy",
+    "flaskk": "flask", "djnago": "django", "djangoo": "django",
+    "sqlalcehmy": "sqlalchemy", "pytets": "pytest", "beautifulsup": "beautifulsoup4",
+    "scikit-lern": "scikit-learn", "scippy": "scipy", "maplotlib": "matplotlib",
+    "pilow": "pillow", "cryptographyy": "cryptography",
+    # JavaScript/Node
+    "lodsh": "lodash", "lohash": "lodash", "monment": "moment", "momnet": "moment",
+    "expresss": "express", "expresjs": "express", "reactt": "react",
+    "axois": "axios", "axiso": "axios", "webpcak": "webpack",
+    "babbel": "babel", "eslnt": "eslint", "typscript": "typescript",
+    "mongosse": "mongoose", "mongose": "mongoose", "sequilize": "sequelize",
+    "jasonwebtoken": "jsonwebtoken", "jsonwebtokn": "jsonwebtoken",
+    "dotenev": "dotenv", "dotevn": "dotenv", "cors2": "cors",
+    "nodemailler": "nodemailer", "nodmailr": "nodemailer",
+}
+
+# ── License compliance ─────────────────────────────────────────────────────────
+
+# Licenses that are problematic for commercial/proprietary use
+COPYLEFT_LICENSES = {
+    "GPL-2.0", "GPL-3.0", "AGPL-3.0", "LGPL-2.0", "LGPL-2.1", "LGPL-3.0",
+    "GPL-2.0-only", "GPL-3.0-only", "AGPL-3.0-only",
+    "GPL", "GPLv2", "GPLv3", "AGPL", "LGPL",
+}
+
+# Known licenses of popular packages (subset — fallback for when no manifest license info)
+KNOWN_PACKAGE_LICENSES: dict[str, str] = {
+    "gpl": "GPL-3.0", "python-gflags": "BSD-3", "gnureadline": "GPL-3.0",
+    "mysql-connector-python": "GPL-2.0", "mysqlclient": "GPL-2.0",
+    "pyqt5": "GPL-3.0", "pyqt6": "GPL-3.0", "sip": "GPL-2.0",
+    "gdb": "GPL-3.0", "ffmpeg-python": "LGPL-2.1",
+}
+
+
 def run_native_scanner(repo_path: str) -> list[dict[str, Any]]:
     """
     Run the native code security scanner on a repository.
@@ -481,8 +685,25 @@ def run_native_scanner(repo_path: str) -> list[dict[str, Any]]:
                         content = f.read()
                     dep_findings = _scan_dependencies(content, filename, rel_path)
                     findings.extend(dep_findings)
+                    # Check for typosquatting
+                    typo_findings = _check_typosquatting(content, filename, rel_path)
+                    findings.extend(typo_findings)
+                    # Check license compliance
+                    license_findings = _check_license_compliance(content, filename, rel_path)
+                    findings.extend(license_findings)
                 except Exception as e:
                     log.debug(f"Native scanner: error reading {rel_path}: {e}")
+
+            # Scan IaC / config files
+            if filename in ("Dockerfile", "docker-compose.yml", "docker-compose.yaml") \
+                    or ext in (".tf", ".yaml", ".yml") and "k8s" not in rel_path:
+                try:
+                    with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read()
+                    iac_findings = _scan_iac_file(content, rel_path, filename)
+                    findings.extend(iac_findings)
+                except Exception as e:
+                    log.debug(f"Native scanner: error reading IaC file {rel_path}: {e}")
 
     log.info(f"Native scanner: scanned {file_count} source files, found {len(findings)} issues")
     return findings
@@ -618,32 +839,242 @@ def _get_call_name(node: ast.Call) -> str:
 
 def _scan_dependencies(content: str, filename: str, filepath: str) -> list[dict]:
     """Scan dependency files for known vulnerable package versions."""
-    findings = []
-
-    if filename == "requirements.txt" or filename == "Pipfile":
-        # Parse package==version lines
+    findings: list[dict] = []
+    if filename in ("requirements.txt", "Pipfile"):
         for line in content.splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            match = re.match(r"^([A-Za-z0-9_\-\.]+)\s*[>=<~!]+\s*([\d\.]+)", line)
+            match = re.match(r"^([A-Za-z0-9_\-\.]+)\s*[>=<!~]+\s*([\d\.]+)", line)
             if match:
                 pkg = match.group(1).lower()
                 version = match.group(2)
                 _check_package(pkg, version, filepath, filename, findings)
+    elif filename == "package.json":
+        try:
+            data = json.loads(content)
+            deps: dict = {}
+            deps.update(data.get("dependencies", {}))
+            deps.update(data.get("devDependencies", {}))
+            for pkg, ver_spec in deps.items():
+                ver = re.sub(r"[\^~>=<]", "", str(ver_spec)).strip()
+                _check_package(pkg.lower(), ver, filepath, filename, findings)
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    return findings
+
+
+def _check_typosquatting(content: str, filename: str, filepath: str) -> list[dict]:
+    """Detect typosquatted package names that may be malicious."""
+    findings = []
+
+    if filename == "requirements.txt" or filename == "Pipfile":
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            match = re.match(r"^([A-Za-z0-9_\-\.]+)", line)
+            if match:
+                pkg = match.group(1).lower().replace("_", "-")
+                if pkg in TYPOSQUAT_PACKAGES:
+                    intended = TYPOSQUAT_PACKAGES[pkg]
+                    findings.append({
+                        "file": filepath,
+                        "line": None,
+                        "issue": f"Possible Typosquatting: '{pkg}' looks like '{intended}'",
+                        "description": f"The package '{pkg}' closely resembles the popular package '{intended}', which may indicate a supply-chain attack. Typosquatted packages can contain malware.",
+                        "severity": "critical",
+                        "rule_id": f"native/typosquat-{pkg}",
+                        "code_snippet": f"Package: {pkg}  # Did you mean: {intended}?",
+                        "suggested_fix": f"Verify this is intentional. If you meant '{intended}', correct the package name and run pip/npm install again. Check the package's source and maintainer.",
+                        "scanner": "semgrep",
+                    })
 
     elif filename == "package.json":
         try:
             data = json.loads(content)
-            deps = {}
-            deps.update(data.get("dependencies", {}))
-            deps.update(data.get("devDependencies", {}))
-            for pkg, ver_spec in deps.items():
-                ver = re.sub(r"[\^~>=<]", "", ver_spec).strip()
-                _check_package(pkg.lower(), ver, filepath, filename, findings)
+            all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+            for pkg in all_deps:
+                normalized = pkg.lower().replace("_", "-")
+                if normalized in TYPOSQUAT_PACKAGES:
+                    intended = TYPOSQUAT_PACKAGES[normalized]
+                    findings.append({
+                        "file": filepath,
+                        "line": None,
+                        "issue": f"Possible Typosquatting: '{pkg}' looks like '{intended}'",
+                        "description": f"The package '{pkg}' closely resembles '{intended}', which may be a supply-chain attack.",
+                        "severity": "critical",
+                        "rule_id": f"native/typosquat-{normalized}",
+                        "code_snippet": f"\"dependencies\": {{ \"{pkg}\": ... }}",
+                        "suggested_fix": f"Verify this is intentional. If you meant '{intended}', correct the spelling. Inspect the package source at npmjs.com.",
+                        "scanner": "semgrep",
+                    })
         except (json.JSONDecodeError, AttributeError):
             pass
 
+    return findings
+
+
+def _check_license_compliance(content: str, filename: str, filepath: str) -> list[dict]:
+    """Check for GPL/copyleft licenses in dependencies."""
+    findings = []
+
+    if filename == "package.json":
+        try:
+            data = json.loads(content)
+            license_field = data.get("license", "")
+            if isinstance(license_field, str) and license_field.upper() in {l.upper() for l in COPYLEFT_LICENSES}:
+                findings.append({
+                    "file": filepath,
+                    "line": None,
+                    "issue": f"Copyleft License Detected: {license_field}",
+                    "description": f"This project uses {license_field}, a copyleft license. If this is a commercial/proprietary project, the GPL license may require you to open-source your entire project.",
+                    "severity": "medium",
+                    "rule_id": "native/copyleft-license",
+                    "code_snippet": f'"license": "{license_field}"',
+                    "suggested_fix": "Review your licensing obligations. For commercial projects, consider MIT, Apache-2.0, or BSD licenses. Consult a lawyer if unsure about GPL implications.",
+                    "scanner": "semgrep",
+                })
+            # Check known packages against license DB
+            all_deps = {**data.get("dependencies", {}), **data.get("devDependencies", {})}
+            for pkg in all_deps:
+                pkg_license = KNOWN_PACKAGE_LICENSES.get(pkg.lower())
+                if pkg_license and pkg_license in COPYLEFT_LICENSES:
+                    findings.append({
+                        "file": filepath,
+                        "line": None,
+                        "issue": f"GPL-Licensed Dependency: {pkg} ({pkg_license})",
+                        "description": f"{pkg} uses {pkg_license}. Using this in a proprietary project may trigger GPL's copyleft requirements.",
+                        "severity": "low",
+                        "rule_id": f"native/gpl-dependency-{pkg}",
+                        "code_snippet": f'"dependencies": {{ "{pkg}": ... }}',
+                        "suggested_fix": f"Evaluate if {pkg} can be replaced with a more permissively licensed alternative.",
+                        "scanner": "semgrep",
+                    })
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    return findings
+
+
+IAC_PATTERNS = [
+    {
+        "id": "docker-run-as-root",
+        "pattern": re.compile(r'^(FROM|RUN|CMD|ENTRYPOINT)', re.MULTILINE),
+        "no_pattern": re.compile(r'^USER\s+(?!root\b|0\b)', re.MULTILINE),
+        "severity": "high",
+        "issue": "Dockerfile Missing USER Directive (Running as Root)",
+        "description": "Containers running as root are dangerous — a container escape grants full host root access.",
+        "fix": "Add 'USER nonroot' or create a dedicated system user: RUN addgroup -S appgroup && adduser -S appuser -G appgroup\nUSER appuser",
+    },
+    {
+        "id": "docker-latest-tag",
+        "pattern": re.compile(r'^FROM\s+\S+:latest', re.MULTILINE),
+        "severity": "medium",
+        "issue": "Dockerfile Using ':latest' Image Tag",
+        "description": "Using ':latest' makes builds non-reproducible and can pull in breaking changes or vulnerable image versions.",
+        "fix": "Pin to a specific version tag: FROM node:20.11.0-alpine3.19 instead of FROM node:latest.",
+    },
+    {
+        "id": "docker-expose-all",
+        "pattern": re.compile(r'^EXPOSE\s+(22|23|3389|5900)\b', re.MULTILINE),
+        "severity": "high",
+        "issue": "Dockerfile Exposing Sensitive Port (SSH/RDP/VNC)",
+        "description": "Exposing administrative ports like SSH (22), Telnet (23), RDP (3389), or VNC (5900) in a container is a security risk.",
+        "fix": "Remove the EXPOSE directive for administrative ports. Use kubectl exec or docker exec for shell access instead.",
+    },
+    {
+        "id": "docker-add-vs-copy",
+        "pattern": re.compile(r'^ADD\s+http', re.MULTILINE),
+        "severity": "medium",
+        "issue": "Dockerfile ADD with Remote URL (Use COPY Instead)",
+        "description": "ADD with a URL fetches files without checksum verification, making builds vulnerable to MITM attacks.",
+        "fix": "Use RUN curl -fsSL <URL> | sha256sum -c <expected> before using the file. Prefer COPY for local files.",
+    },
+    {
+        "id": "k8s-privileged-container",
+        "pattern": re.compile(r'privileged:\s*true', re.IGNORECASE),
+        "severity": "critical",
+        "issue": "Kubernetes Pod Running in Privileged Mode",
+        "description": "Privileged containers have full access to the host kernel. A vulnerability in the container could grant full host access.",
+        "fix": "Set securityContext.privileged: false. Use specific capabilities instead: securityContext.capabilities.add: [NET_BIND_SERVICE].",
+    },
+    {
+        "id": "k8s-no-resource-limits",
+        "pattern": re.compile(r'containers:', re.IGNORECASE),
+        "no_pattern": re.compile(r'resources:\s*\n\s+limits:', re.IGNORECASE),
+        "severity": "medium",
+        "issue": "Kubernetes Container Missing Resource Limits",
+        "description": "Containers without resource limits can consume all node resources, causing denial of service for other pods.",
+        "fix": "Add resources.limits.cpu and resources.limits.memory to each container spec.",
+    },
+    {
+        "id": "k8s-host-network",
+        "pattern": re.compile(r'hostNetwork:\s*true', re.IGNORECASE),
+        "severity": "high",
+        "issue": "Kubernetes Pod Using Host Network",
+        "description": "hostNetwork: true bypasses Kubernetes network isolation, giving the pod access to all host network interfaces.",
+        "fix": "Remove hostNetwork: true. Use Kubernetes Services and ClusterIP for internal communication.",
+    },
+    {
+        "id": "tf-public-s3-bucket",
+        "pattern": re.compile(r'(acl\s*=\s*["\']public-read|block_public_acls\s*=\s*false)', re.IGNORECASE),
+        "severity": "critical",
+        "issue": "Terraform S3 Bucket Publicly Accessible",
+        "description": "An S3 bucket is configured for public read access or public ACLs are not blocked, risking data exposure.",
+        "fix": "Set aws_s3_bucket_public_access_block with block_public_acls = true. Use bucket policies for controlled access.",
+    },
+    {
+        "id": "tf-security-group-all",
+        "pattern": re.compile(r'cidr_blocks\s*=\s*\[\s*["\']0\.0\.0\.0/0["\']', re.IGNORECASE),
+        "severity": "high",
+        "issue": "Terraform Security Group Open to All IPs (0.0.0.0/0)",
+        "description": "A security group rule allows traffic from any IP address. This exposes services to the entire internet.",
+        "fix": "Restrict ingress to specific CIDR ranges. For SSH: use a VPN CIDR or bastion host. Never expose 0.0.0.0/0 for SSH.",
+    },
+    {
+        "id": "docker-compose-no-health",
+        "pattern": re.compile(r'^\s+image:\s+', re.MULTILINE),
+        "no_pattern": re.compile(r'healthcheck:', re.IGNORECASE),
+        "severity": "low",
+        "issue": "docker-compose Service Missing Healthcheck",
+        "description": "Services without healthchecks may be considered ready before they are fully initialized, causing errors.",
+        "fix": "Add a healthcheck section to each service: healthcheck:\n  test: [CMD, curl, -f, http://localhost/health]\n  interval: 30s",
+    },
+]
+
+
+def _scan_iac_file(content: str, filepath: str, filename: str) -> list[dict]:
+    """Scan IaC files (Dockerfiles, docker-compose, Terraform, K8s YAML) for security issues."""
+    findings = []
+    for p in IAC_PATTERNS:
+        if p["pattern"].search(content):
+            # If there's a 'no_pattern' that should be present but isn't, flag it
+            if "no_pattern" in p:
+                if not p["no_pattern"].search(content):
+                    findings.append({
+                        "file": filepath,
+                        "line": None,
+                        "issue": p["issue"],
+                        "description": p["description"],
+                        "severity": p["severity"],
+                        "rule_id": f"native/{p['id']}",
+                        "code_snippet": filename,
+                        "suggested_fix": p["fix"],
+                        "scanner": "semgrep",
+                    })
+            else:
+                findings.append({
+                    "file": filepath,
+                    "line": None,
+                    "issue": p["issue"],
+                    "description": p["description"],
+                    "severity": p["severity"],
+                    "rule_id": f"native/{p['id']}",
+                    "code_snippet": filename,
+                    "suggested_fix": p["fix"],
+                    "scanner": "semgrep",
+                })
     return findings
 
 

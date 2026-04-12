@@ -1,0 +1,59 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+ENV/
+env/
+
+# ── AI Model weights (NEVER include in Docker — 637MB+) ───────────────────────
+ark_ml/*.gguf
+ark_ml/*.bin
+ark_ml/*.safetensors
+
+# ── Database files ────────────────────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Test files ────────────────────────────────────────────────────────────────
+tests/
+test_*.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ── Debug output files ────────────────────────────────────────────────────────
+out.txt
+out_api.txt
+out_github.txt
+out_list.txt
+out_*
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+.env
+*.log
+*.tmp
+migrate_db.py
+check_db.py

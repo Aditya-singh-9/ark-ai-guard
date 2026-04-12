@@ -3,7 +3,7 @@
  * On mount, restores session from localStorage JWT via GET /auth/me.
  */
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
-import { getMe, removeToken, setToken, getToken, User } from "@/lib/api";
+import { getMe, removeToken, setToken, getToken, User, logoutApi } from "@/lib/api";
 
 interface AuthState {
   user: User | null;
@@ -46,6 +46,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const logout = () => {
+    // Fire-and-forget server-side revocation (non-blocking)
+    logoutApi().catch(() => {/* best-effort */});
     removeToken();
     setUser(null);
   };

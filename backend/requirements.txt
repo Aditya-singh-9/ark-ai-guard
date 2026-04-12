@@ -23,6 +23,8 @@ gitpython==3.1.43
 
 # ── AI Integration ────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
+llama-cpp-python==0.3.20   # Updated: 0.2.56 → 0.3.20 (installed after C++ build tools)
+huggingface-hub==0.27.0
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 slowapi==0.1.9
@@ -34,4 +36,3 @@ python-dotenv==1.0.1
 pytest==8.3.4
 pytest-asyncio==0.24.0
 pytest-cov==6.0.0
-httpx==0.28.1  # Also used for TestClient

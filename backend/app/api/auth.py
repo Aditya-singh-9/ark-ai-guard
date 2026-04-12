@@ -8,8 +8,9 @@ Endpoints:
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import BaseModel
@@ -20,9 +21,11 @@ from app.models.user import User
 from app.services import github_service
 from app.utils.config import settings
 from app.utils.logger import get_logger
+from app.security.token_denylist import deny_token, is_denied
 
 log = get_logger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+from app.api.limiter import limiter
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/github", auto_error=False)
 
@@ -57,7 +60,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
+    # jti (JWT ID) enables per-token revocation
     to_encode["exp"] = expire
+    to_encode["jti"] = str(uuid.uuid4())
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
@@ -66,6 +71,14 @@ def decode_token(token: str) -> dict[str, Any]:
         payload = jwt.decode(
             token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM]
         )
+        # Check denylist — revoked tokens are rejected even if signature is valid
+        jti = payload.get("jti")
+        if jti and is_denied(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked. Please log in again.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
         return payload
     except JWTError as exc:
         raise HTTPException(
@@ -133,7 +146,8 @@ def get_decrypted_token(user: User) -> str:
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
 @router.post("/github", response_model=TokenResponse, summary="GitHub OAuth Login")
-async def github_login(body: GitHubCodeRequest, db: Session = Depends(get_db)) -> dict:
+@limiter.limit("5/minute")
+async def github_login(request: Request, body: GitHubCodeRequest, db: Session = Depends(get_db)) -> dict:
     """
     Exchange a GitHub OAuth authorization code for a JWT access token.
 
@@ -219,9 +233,26 @@ async def get_me(current_user: User = Depends(get_current_user)) -> User:
 
 
 @router.post("/logout", summary="Logout")
-async def logout() -> dict:
+async def logout(
+    token: Optional[str] = Depends(oauth2_scheme),
+) -> dict:
     """
-    Stateless logout — instructs the client to discard the JWT.
-    (For token blocklisting, add Redis-based denylist.)
+    Revoke the current JWT by adding its jti to the denylist.
+    Even if the token is not provided, this still returns success (idempotent).
     """
-    return {"message": "Logged out. Please discard your access token."}
+    if token:
+        try:
+            # Decode without raising — we just want the jti and exp
+            payload = jwt.decode(
+                token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+                options={"verify_exp": False},  # might already be expired
+            )
+            jti = payload.get("jti")
+            exp = payload.get("exp")
+            if jti:
+                ttl = max(0, int(exp - datetime.now(timezone.utc).timestamp())) if exp else 86400
+                deny_token(jti, ttl)
+                log.info(f"[Auth] Token {jti[:8]}... revoked on logout")
+        except Exception:
+            pass  # Malformed token — still return success
+    return {"message": "Logged out successfully. Token has been revoked."}

@@ -14,7 +14,13 @@ import CICDGeneratorPage from "./pages/CICDGeneratorPage.tsx";
 import SettingsPage from "./pages/SettingsPage.tsx";
 import ProfilePage from "./pages/ProfilePage.tsx";
 import SecurityScansPage from "./pages/SecurityScansPage.tsx";
+import DeepScanPage from "./pages/DeepScanPage.tsx";
+import TrendsPage from "./pages/TrendsPage.tsx";
 import AuthCallback from "./pages/AuthCallback.tsx";
+// New enterprise pages — wired to previously unused backend endpoints
+import CompliancePage from "./pages/CompliancePage.tsx";
+import ThreatAnalysisPage from "./pages/ThreatAnalysisPage.tsx";
+import PolicyPage from "./pages/PolicyPage.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -39,8 +45,14 @@ const App = () => (
               <Route index element={<DashboardOverview />} />
               <Route path="repos" element={<RepositoriesPage />} />
               <Route path="scans" element={<SecurityScansPage />} />
+              <Route path="scans/:scanId/deep" element={<DeepScanPage />} />
               <Route path="vulns" element={<VulnerabilitiesPage />} />
+              <Route path="trends" element={<TrendsPage />} />
               <Route path="cicd" element={<CICDGeneratorPage />} />
+              {/* New enterprise routes */}
+              <Route path="compliance" element={<CompliancePage />} />
+              <Route path="threats" element={<ThreatAnalysisPage />} />
+              <Route path="policy" element={<PolicyPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="profile" element={<ProfilePage />} />
             </Route>

@@ -71,7 +71,8 @@ class RepoClonerService:
         os.makedirs(settings.SCAN_TEMP_DIR, exist_ok=True)
 
     def get_clone_path(self, scan_id: int) -> str:
-        return os.path.join(settings.SCAN_TEMP_DIR, f"scan-{scan_id}")
+        import uuid
+        return os.path.join(settings.SCAN_TEMP_DIR, f"scan-{scan_id}-{uuid.uuid4().hex[:8]}")
 
     def clone_repository(self, clone_url: str, scan_id: int, access_token: str | None = None) -> str:
         """
@@ -111,10 +112,16 @@ class RepoClonerService:
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=600,
+                env={
+                    **os.environ, 
+                    "GIT_TERMINAL_PROMPT": "0",
+                    "GCM_INTERACTIVE": "false",
+                    "GIT_ASKPASS": "echo"
+                },
             )
         except subprocess.TimeoutExpired:
-            raise RuntimeError("Git clone timed out after 120 seconds")
+            raise RuntimeError("Git clone timed out after 600 seconds")
         except Exception as exc:
             raise RuntimeError(f"Git clone failed: {exc}") from exc
 
@@ -203,11 +210,40 @@ class RepoClonerService:
             ),
         }
 
-    def cleanup(self, scan_id: int) -> None:
+    def get_repo_path(self, full_name: str) -> str | None:
+        """
+        Return a cached clone path for a repo by full_name, if it still exists on disk.
+        Falls back to checking temp dir for any matching scan clone.
+        Used by the SBOM endpoint.
+        """
+        # Check if any scan clone still exists for this repo
+        try:
+            for entry in os.listdir(settings.SCAN_TEMP_DIR):
+                candidate = os.path.join(settings.SCAN_TEMP_DIR, entry)
+                if os.path.isdir(candidate):
+                    # Check if this clone matches the requested repo
+                    git_config = os.path.join(candidate, ".git", "config")
+                    if os.path.exists(git_config):
+                        with open(git_config, "r", encoding="utf-8", errors="ignore") as f:
+                            if full_name.lower() in f.read().lower():
+                                return candidate
+        except (OSError, FileNotFoundError):
+            pass
+        return None
+
+    def cleanup(self, clone_path: str | None) -> None:
         """Remove the cloned repository from disk."""
-        clone_path = self.get_clone_path(scan_id)
+        if not clone_path:
+            return
         if os.path.exists(clone_path):
-            shutil.rmtree(clone_path, ignore_errors=True)
+            import stat
+            def remove_readonly(func, path, _):
+                os.chmod(path, stat.S_IWRITE)
+                try:
+                    func(path)
+                except Exception:
+                    pass
+            shutil.rmtree(clone_path, onerror=remove_readonly)
             log.info(f"Cleaned up clone at {clone_path}")
 
 

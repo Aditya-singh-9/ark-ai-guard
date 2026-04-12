@@ -10,11 +10,11 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
-from app.api import auth, repository, scan, reports
+from app.api.limiter import limiter
+
+from app.api import auth, repository, scan, reports, webhooks
 from app.database.db import init_db, check_db_connection
 from app.utils.config import settings
 from app.utils.logger import get_logger
@@ -24,7 +24,7 @@ log = get_logger("ark.main")
 
 # ── Rate Limiter ──────────────────────────────────────────────────────────────
 
-limiter = Limiter(key_func=get_remote_address)
+# Removed local limiter instantiation
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -33,6 +33,14 @@ limiter = Limiter(key_func=get_remote_address)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown logic."""
     log.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} ({settings.APP_ENV})")
+
+    # Startup security checks
+    if "CHANGE_ME" in settings.SECRET_KEY and settings.APP_ENV != "development":
+        log.error("FATAL: SECRET_KEY is insecure default value! Set a real key via .env")
+    if not settings.ENCRYPTION_KEY:
+        log.warning("SECURITY WARNING: ENCRYPTION_KEY is not set — GitHub tokens stored in plaintext!")
+    if not settings.GITHUB_WEBHOOK_SECRET:
+        log.warning("SECURITY WARNING: GITHUB_WEBHOOK_SECRET is not set — webhook verification disabled!")
 
     # Initialise database tables
     try:
@@ -68,6 +76,7 @@ def create_app() -> FastAPI:
     app.state.limiter = limiter
 
     # ── Exception Handlers ────────────────────────────────────────────────────
+    from slowapi import _rate_limit_exceeded_handler
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     @app.exception_handler(Exception)
@@ -92,14 +101,23 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Request timing middleware
+    # Request timing + Security headers middleware
     @app.middleware("http")
-    async def add_process_time_header(request: Request, call_next):
+    async def add_security_headers(request: Request, call_next):
         start = time.perf_counter()
         response = await call_next(request)
         elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
+        # Performance
         response.headers["X-Process-Time-MS"] = str(elapsed_ms)
         response.headers["X-ARK-Version"] = settings.APP_VERSION
+        # Security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        if settings.APP_ENV == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
         return response
 
     # ── Routers ───────────────────────────────────────────────────────────────
@@ -109,6 +127,7 @@ def create_app() -> FastAPI:
     app.include_router(repository.router, prefix=PREFIX)
     app.include_router(scan.router, prefix=PREFIX)
     app.include_router(reports.router, prefix=PREFIX)
+    app.include_router(webhooks.router, prefix=PREFIX)
 
     # ── Health & Info Endpoints ───────────────────────────────────────────────
 
@@ -129,6 +148,21 @@ def create_app() -> FastAPI:
         return {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
+            "engine": "ARK Nexus Engine™ + Mythos™ AI",
+            "models": ["Mythos (offline)", "Gemini (online)"],
+            "layers": 7,
+            "features": [
+                "7-Layer Deep Security Scanning",
+                "Multi-Model AI Fusion",
+                "OWASP/CWE/MITRE ATT&CK Mapping",
+                "Compliance Frameworks (SOC2, PCI, HIPAA, ISO 27001)",
+                "AI Auto-Fix Generation",
+                "Policy-as-Code Security Gates",
+                "GitHub Webhook Auto-Scan",
+                "PR Security Comment Bot",
+                "STRIDE Threat Modeling",
+                "Attack Chain Detection",
+            ],
             "docs": "/docs",
             "health": "/health",
         }

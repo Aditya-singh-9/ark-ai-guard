@@ -2,7 +2,7 @@ version: '3.9'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ARK DevSecOps AI — Docker Compose
-# Services: api (FastAPI), db (PostgreSQL 16), redis (future cache/queue)
+# Services: nginx (reverse proxy), api (FastAPI), db (PostgreSQL 16), redis (token denylist + cache)
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -30,7 +30,7 @@ services:
     networks:
       - ark_network
 
-  # ── Redis (Future: Task Queue / Caching) ─────────────────────────────────
+  # ── Redis (Token Denylist + Future Cache) ────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: ark_redis
@@ -69,6 +69,7 @@ services:
       SCAN_TEMP_DIR: /tmp/ark-scans
       REDIS_URL: redis://redis:6379/0
     ports:
+      # IMPORTANT: In production, remove this port and access via Nginx only
       - "8000:8000"
     volumes:
       # Mount scan temp dir as writable volume
@@ -84,6 +85,32 @@ services:
     labels:
       - "com.ark.service=api"
       - "com.ark.version=1.0.0"
+
+  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ark_nginx
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      # Uncomment for HTTPS (requires TLS certs mounted via volumes):
+      # - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      # Uncomment for TLS certificates:
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - ark_network
+    labels:
+      - "com.ark.service=nginx"
 
 # ── Local Development Override ─────────────────────────────────────────────
 # Override with: docker compose -f docker-compose.yml -f docker-compose.dev.yml up

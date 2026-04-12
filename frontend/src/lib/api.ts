@@ -41,6 +41,12 @@ async function request<T>(
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
+    // Auto-logout on 401 Unauthorized (e.g., token expired or database wiped)
+    if (res.status === 401) {
+      removeToken();
+      window.location.href = "/";
+      return Promise.reject("Session expired. Please log in again.");
+    }
     const msg =
       data?.detail ??
       data?.message ??
@@ -74,13 +80,17 @@ export interface Repository {
   is_private: boolean;
   total_scans: number;
   last_scanned_at: string | null;
+  security_score: number | null;
+  scan_status: string | null;
+  latest_scan_id?: number | null;
 }
 
 export interface ScanStatus {
   scan_id: number;
   repository_id: number;
-  status: "pending" | "running" | "completed" | "failed";
+  status: "pending" | "cloning" | "scanning" | "analysing" | "finalising" | "running" | "completed" | "failed";
   security_score: number | null;
+  nexus_score: number | null;
   total_vulnerabilities: number;
   critical_count: number;
   high_count: number;
@@ -91,6 +101,8 @@ export interface ScanStatus {
   completed_at: string | null;
   duration_seconds: number | null;
   error_message: string | null;
+  scan_phase_detail: string | null;
+  layers_completed: number[] | null;
 }
 
 export interface VulnerabilityItem {
@@ -109,6 +121,12 @@ export interface VulnerabilityItem {
   package_name: string | null;
   package_version: string | null;
   fixed_version: string | null;
+  layer_id?: number | null;
+  confidence?: number | null;
+  exploitability?: number | null;
+  blast_radius?: number | null;
+  false_positive_probability?: number | null;
+  ai_summary?: string | null;
 }
 
 export interface VulnerabilityReport {
@@ -206,6 +224,21 @@ export async function getScanStatus(scanId: number): Promise<ScanStatus> {
   return request(`/scans/${scanId}/status`);
 }
 
+/** Get granular live status for Deep Scan. */
+export interface LiveScanStatus {
+  scan_id: number;
+  status: string;
+  scan_phase_detail: string;
+  layers_completed: number[];
+  nexus_score: number | null;
+  total_vulnerabilities: number;
+  is_complete: boolean;
+}
+
+export async function getLiveScanStatus(scanId: number): Promise<LiveScanStatus> {
+  return request(`/scans/${scanId}/live-status`);
+}
+
 /** Get the latest scan result for a repository. */
 export async function getLatestScanResult(repoId: number): Promise<ScanStatus> {
   return request(`/scan-results/${repoId}`);
@@ -233,4 +266,139 @@ export async function generateCicd(repoId: number): Promise<CICDResponse> {
     method: "POST",
     body: JSON.stringify({ repository_id: repoId }),
   });
+}
+
+/** List all GitHub repos accessible to the current user (for auto-import). */
+export interface GithubRepoItem {
+  id: number;
+  full_name: string;
+  description: string | null;
+  language: string | null;
+  is_private: boolean;
+  html_url: string;
+  updated_at: string | null;
+}
+
+export async function listGithubRepos(): Promise<GithubRepoItem[]> {
+  return request("/github/repos");
+}
+
+// ── New endpoints ─────────────────────────────────────────────────────────────
+
+export interface TrendPoint {
+  scan_id: number;
+  date: string;
+  security_score: number | null;
+  total_vulnerabilities: number;
+  critical_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  duration_seconds: number | null;
+}
+
+export interface ScanTrends {
+  repository_id: number;
+  repository_name: string;
+  total_scans: number;
+  trend: TrendPoint[];
+}
+
+/** Get scan score history / trend for a repo. */
+export async function getRepoTrends(repoId: number): Promise<ScanTrends> {
+  return request(`/repositories/${repoId}/trends`);
+}
+
+/** Return the base API URL for direct download links (SBOM, report). */
+export function getApiBase(): string {
+  return (import.meta.env.VITE_API_URL as string) || "http://localhost:8000/api/v1";
+}
+
+/** Download the SBOM for a repo (returns a direct download URL). */
+export function getSbomUrl(repoId: number, format = "cyclonedx"): string {
+  return `${getApiBase()}/repositories/${repoId}/sbom?format=${format}`;
+}
+
+/** Download an HTML vulnerability report for a scan. */
+export function getReportDownloadUrl(scanId: number): string {
+  return `${getApiBase()}/vulnerability-report/${scanId}/download`;
+}
+
+/** Helper to download files securely using JWT Bearer token */
+export async function downloadSecureFile(url: string, filename: string): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) throw new Error("File download failed. Status " + res.status);
+
+  const blob = await res.blob();
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = downloadUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(downloadUrl);
+}
+
+/** Get the badge SVG URL for a repo. */
+export function getBadgeUrl(repoId: number): string {
+  return `${getApiBase()}/repositories/${repoId}/badge`;
+}
+
+/** Test a Slack webhook URL. */
+export async function testSlackWebhook(webhookUrl: string): Promise<{ status: string; message: string }> {
+  return request("/notifications/test-slack", {
+    method: "POST",
+    body: JSON.stringify({ webhook_url: webhookUrl }),
+  });
+}
+
+/** Create Auto-Fix Pull Request on GitHub */
+export async function createAutofixPr(scanId: number): Promise<{ status: string; message: string; pr_url?: string }> {
+  return request(`/scans/${scanId}/create-pr`, {
+    method: "POST",
+  });
+}
+
+// ── Mythos AI & Policy Data Endpoints ────────────────────────────────────────
+
+/** Get compliance framework analysis */
+export async function getScanCompliance(scanId: number): Promise<any> {
+  return request(`/scans/${scanId}/compliance`);
+}
+
+/** Get OWASP Top 10 coverage analysis */
+export async function getScanOwasp(scanId: number): Promise<any> {
+  return request(`/scans/${scanId}/owasp`);
+}
+
+/** Get policy-as-code gate status and violations */
+export async function getScanPolicy(scanId: number): Promise<any> {
+  return request(`/scans/${scanId}/policy`);
+}
+
+/** Get AI auto-fix suggestions for vulnerabilities */
+export async function getScanAutofixes(scanId: number): Promise<any> {
+  return request(`/scans/${scanId}/autofixes`);
+}
+
+/** Get AI threat analysis including STRIDE and risk level */
+export async function getScanThreatAnalysis(scanId: number): Promise<any> {
+  return request(`/scans/${scanId}/threat-analysis`);
+}
+
+/** Call backend logout endpoint to revoke the JWT token server-side. */
+export async function logoutApi(): Promise<{ message: string }> {
+  return request("/auth/logout", { method: "POST" });
+}
+
+/** Backend health check — used to verify connectivity */
+export async function healthCheck(): Promise<{ status: string; version?: string }> {
+  const res = await fetch(`${API_BASE.replace("/api/v1", "")}/health`);
+  if (!res.ok) throw new Error("Backend unreachable");
+  return res.json();
 }

@@ -39,9 +39,15 @@ class Settings(BaseSettings):
     GITHUB_API_BASE: str = "https://api.github.com"
     GITHUB_TOKEN_URL: str = "https://github.com/login/oauth/access_token"
 
-    # ── AI / Gemini ───────────────────────────────────────────────────────────
+    # ── AI / Multi-Model ───────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-1.5-pro"
+    ANTHROPIC_API_KEY: str = ""        # Claude API key (optional, for enhanced AI fusion)
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-20250514"
+
+    # ── GitHub Webhooks & Data API ───────────────────────────────────────
+    GITHUB_WEBHOOK_SECRET: str = ""    # HMAC-SHA256 secret for webhook verification
+    GITHUB_PAT: str = ""               # Personal Access Token for creating Auto-Fix PRs
 
     # ── Scanning ─────────────────────────────────────────────────────────────
     SCAN_TEMP_DIR: str = "/tmp/ark-scans"
@@ -59,6 +65,10 @@ class Settings(BaseSettings):
     # ── Rate Limiting ─────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 60
     RATE_LIMIT_SCAN_PER_HOUR: int = 10
+
+    # ── Redis (Token Denylist + Future Caching/Queuing) ───────────────────────
+    # Set to redis://localhost:6379/0 to enable distributed JWT revocation
+    REDIS_URL: str = ""  # Empty = use in-memory denylist (single-process only)
 
 
 @lru_cache()

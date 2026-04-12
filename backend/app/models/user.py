@@ -4,7 +4,7 @@ SQLite-compatible: uses Integer instead of BigInteger.
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Integer, DateTime, Text, func
+from sqlalchemy import String, Integer, BigInteger, DateTime, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.db import Base
 
@@ -13,7 +13,7 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    github_id: Mapped[int] = mapped_column(Integer, unique=True, nullable=False, index=True)
+    github_id: Mapped[int] = mapped_column(BigInteger, unique=True, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

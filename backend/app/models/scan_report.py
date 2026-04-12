@@ -13,6 +13,10 @@ from app.database.db import Base
 class ScanStatus(str, enum.Enum):
     PENDING = "pending"
     RUNNING = "running"
+    CLONING = "cloning"
+    SCANNING = "scanning"
+    ANALYSING = "analysing"
+    FINALISING = "finalising"
     COMPLETED = "completed"
     FAILED = "failed"
 
@@ -45,8 +49,17 @@ class ScanReport(Base):
     medium_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     low_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
-    # Security scoring (0–100)
+    # Legacy security score (0–100) — kept for backward compatibility
     security_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Nexus Score™ (0–100) — multiplicative risk model from Nexus Engine
+    nexus_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Which Nexus Engine layers completed (JSON list e.g. [1,2,3,4,5,6,7])
+    scan_layers_completed: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Real-time phase detail for live UI progress
+    scan_phase_detail: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
     # Detected tech stack
     detected_language: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
@@ -56,8 +69,31 @@ class ScanReport(Base):
     ai_recommendations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON
     architecture_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Nexus executive summary (JSON)
+    nexus_executive_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # Generated CI/CD pipeline YAML
     cicd_yaml: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # ── ARK Mythos™ AI Analysis ───────────────────────────────────────────
+    mythos_risk_level: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # CRITICAL/HIGH/MEDIUM/LOW
+    mythos_attack_surface: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-100
+    compliance_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: SOC2, PCI, HIPAA, ISO
+    owasp_coverage: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON: OWASP Top 10 mapping
+    threat_model: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # STRIDE threat model
+    executive_brief: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Mythos executive summary
+
+    # ── Policy-as-Code Engine ─────────────────────────────────────────────
+    policy_gate_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # pass/warn/block
+    policy_violations: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+
+    # ── AI Auto-Fix Suggestions ───────────────────────────────────────────
+    autofix_suggestions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
+
+    # ── Webhook/Trigger Metadata ──────────────────────────────────────────
+    trigger: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # manual/webhook_push/webhook_pr_N
+    branch: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    commit_sha: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
 
     # Error details (if scan failed)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -70,8 +106,9 @@ class ScanReport(Base):
 
     def compute_security_score(self) -> float:
         """
-        Calculate security score 0–100.
+        Legacy security score 0–100.
         Deduct: critical*15, high*7, medium*3, low*1. Floor at 0.
+        Kept for backward compatibility alongside Nexus Score.
         """
         deduction = (
             self.critical_count * 15
@@ -82,4 +119,4 @@ class ScanReport(Base):
         return max(0.0, 100.0 - deduction)
 
     def __repr__(self) -> str:
-        return f"<ScanReport id={self.id} repo_id={self.repository_id} score={self.security_score}>"
+        return f"<ScanReport id={self.id} repo_id={self.repository_id} nexus_score={self.nexus_score}>"

@@ -1,15 +1,22 @@
 """
-Reports router — vulnerability reports and CI/CD generation.
+Reports router — vulnerability reports, CI/CD generation, SBOM, trends, and badges.
 
 Endpoints:
-  GET  /vulnerability-report/{scan_id}   Full vulnerability report for a scan
-  POST /generate-cicd                    Generate a CI/CD pipeline for a repo
-  GET  /dashboard/stats                  Aggregate security stats for the user
+  GET  /vulnerability-report/{scan_id}     Full vulnerability report for a scan
+  POST /generate-cicd                      Generate a CI/CD pipeline for a repo
+  GET  /dashboard/stats                    Aggregate security stats for the user
+  GET  /repositories/{id}/trends           Scan score trend history for a repo
+  GET  /repositories/{id}/sbom             Download Software Bill of Materials
+  GET  /repositories/{id}/badge            Security score badge SVG
+  GET  /vulnerability-report/{id}/download Download HTML report
+  POST /notifications/test-slack           Test Slack webhook
 """
 import json
+import subprocess
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 
@@ -239,22 +246,37 @@ async def generate_cicd(
         .first()
     )
 
-    # Build structure dict from scan metadata if available
     if latest_scan:
         try:
             frameworks = json.loads(latest_scan.detected_frameworks or "[]")
         except json.JSONDecodeError:
             frameworks = []
+
+        # Try to enrich with structure data from a live clone if available
+        has_docker = False
+        package_manifests: list[str] = []
+        clone_path = repo_cloner.get_repo_path(repo.full_name)
+        if clone_path:
+            try:
+                live_structure = repo_cloner.analyse_structure(clone_path)
+                has_docker = live_structure.get("has_docker", False)
+                package_manifests = live_structure.get("package_manifests", [])
+                # Prefer live frameworks if richer
+                if live_structure.get("frameworks"):
+                    frameworks = live_structure["frameworks"]
+            except Exception:
+                pass
+
         structure = {
             "language": latest_scan.detected_language or "python",
             "frameworks": frameworks,
-            "has_docker": False,
-            "package_manifests": [],
+            "has_docker": has_docker,
+            "package_manifests": package_manifests,
         }
     else:
-        # No scan yet — use minimal defaults
+        # No scan yet — infer from repo metadata if possible
         structure = {
-            "language": "python",
+            "language": repo.language or "python",
             "frameworks": [],
             "has_docker": False,
             "package_manifests": [],
@@ -366,3 +388,325 @@ def get_dashboard_stats(
         "low_count": low,
         "repositories": repo_summaries,
     }
+
+
+# ── Scan Trend History ──────────────────────────────────────────────────────
+
+@router.get(
+    "/repositories/{repo_id}/trends",
+    summary="Get Scan Score Trend History",
+)
+def get_scan_trends(
+    repo_id: int,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Return the last N completed scans for a repo as a time series."""
+    repo = (
+        db.query(Repository)
+        .filter(Repository.id == repo_id, Repository.user_id == current_user.id)
+        .first()
+    )
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    scans = (
+        db.query(ScanReport)
+        .filter(
+            ScanReport.repository_id == repo_id,
+            ScanReport.status == ScanStatus.COMPLETED,
+        )
+        .order_by(ScanReport.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    trend_points = [
+        {
+            "scan_id": s.id,
+            "date": s.completed_at.isoformat() if s.completed_at else s.scan_time.isoformat(),
+            "security_score": s.security_score,
+            "total_vulnerabilities": s.total_vulnerabilities,
+            "critical_count": s.critical_count,
+            "high_count": s.high_count,
+            "medium_count": s.medium_count,
+            "low_count": s.low_count,
+            "duration_seconds": s.duration_seconds,
+        }
+        for s in reversed(scans)  # chronological order
+    ]
+
+    return {
+        "repository_id": repo_id,
+        "repository_name": repo.full_name,
+        "total_scans": len(trend_points),
+        "trend": trend_points,
+    }
+
+
+# ── SBOM Generator ─────────────────────────────────────────────────────────────
+
+@router.get(
+    "/repositories/{repo_id}/sbom",
+    summary="Download Software Bill of Materials (SBOM)",
+)
+def get_sbom(
+    repo_id: int,
+    format: str = "cyclonedx",  # cyclonedx | spdx
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and download an SBOM for the repository using Trivy."""
+    repo = (
+        db.query(Repository)
+        .filter(Repository.id == repo_id, Repository.user_id == current_user.id)
+        .first()
+    )
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    repo_path = repo_cloner.get_repo_path(repo.full_name)
+    if not repo_path:
+        raise HTTPException(status_code=404, detail="Repository not cloned yet. Run a scan first.")
+
+    sbom_format = "cyclonedx" if format != "spdx" else "spdx-json"
+    
+    try:
+        result = subprocess.run(
+            ["trivy", "fs", "--format", sbom_format, "--no-progress", "--quiet", repo_path],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        sbom_content = result.stdout or "{}"
+    except FileNotFoundError:
+        # Trivy not installed — generate a basic SBOM from scan data
+        latest_scan = (
+            db.query(ScanReport)
+            .filter(ScanReport.repository_id == repo_id, ScanReport.status == ScanStatus.COMPLETED)
+            .order_by(ScanReport.id.desc()).first()
+        )
+        vulns = db.query(Vulnerability).filter(
+            Vulnerability.scan_id == latest_scan.id if latest_scan else False
+        ).all() if latest_scan else []
+        
+        components = [
+            {"type": "library", "name": v.package_name, "version": v.package_version or "unknown"}
+            for v in vulns if v.package_name
+        ]
+        sbom_content = json.dumps({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.4",
+            "metadata": {"component": {"name": repo.full_name, "type": "application"}},
+            "components": components,
+        }, indent=2)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"SBOM generation failed: {exc}")
+
+    content_type = "application/json"
+    filename = f"sbom-{repo.name}-{sbom_format}.json"
+    return Response(
+        content=sbom_content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── Security Badge SVG ──────────────────────────────────────────────────────
+
+@router.get(
+    "/repositories/{repo_id}/badge",
+    summary="Get Security Score Badge SVG",
+    include_in_schema=False,
+)
+def get_security_badge(
+    repo_id: int,
+    db: Session = Depends(get_db),
+):
+    """Return a Shields.io-style SVG badge showing the security score."""
+    repo = (
+        db.query(Repository)
+        .filter(Repository.id == repo_id)
+        .first()
+    )
+    latest_scan = (
+        db.query(ScanReport)
+        .filter(ScanReport.repository_id == repo_id, ScanReport.status == ScanStatus.COMPLETED)
+        .order_by(ScanReport.id.desc()).first()
+    ) if repo else None
+    
+    if not repo or not latest_scan or latest_scan.security_score is None:
+        score_text = "unknown"
+        color = "#9e9e9e"
+    else:
+        score = int(latest_scan.security_score)
+        score_text = f"{score}%"
+        color = "#4caf50" if score >= 80 else "#ff9800" if score >= 50 else "#f44336"
+
+    label = "ARK Security"
+    label_width = len(label) * 6 + 10
+    value_width = len(score_text) * 7 + 10
+    total_width = label_width + value_width
+
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_width}" height="20">
+  <linearGradient id="s" x2="0" y2="100%">
+    <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+    <stop offset="1" stop-opacity=".1"/>
+  </linearGradient>
+  <rect rx="3" width="{total_width}" height="20" fill="#555"/>
+  <rect rx="3" x="{label_width}" width="{value_width}" height="20" fill="{color}"/>
+  <rect rx="3" width="{total_width}" height="20" fill="url(#s)"/>
+  <g fill="#fff" text-anchor="middle" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11">
+    <text x="{label_width // 2}" y="15" fill="#010101" fill-opacity=".3">{label}</text>
+    <text x="{label_width // 2}" y="14">{label}</text>
+    <text x="{label_width + value_width // 2}" y="15" fill="#010101" fill-opacity=".3">{score_text}</text>
+    <text x="{label_width + value_width // 2}" y="14">{score_text}</text>
+  </g>
+</svg>"""
+
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "max-age=300"},
+    )
+
+
+# ── HTML Report Download ─────────────────────────────────────────────────────
+
+@router.get(
+    "/vulnerability-report/{scan_id}/download",
+    summary="Download Vulnerability Report as HTML",
+)
+def download_html_report(
+    scan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Generate and download a full HTML security report for a scan."""
+    scan = (
+        db.query(ScanReport)
+        .options(joinedload(ScanReport.repository))
+        .join(Repository, ScanReport.repository_id == Repository.id)
+        .filter(ScanReport.id == scan_id, Repository.user_id == current_user.id)
+        .first()
+    )
+    if not scan:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    vulns = db.query(Vulnerability).filter(Vulnerability.scan_id == scan_id).all()
+    
+    sev_colors = {"critical": "#f44336", "high": "#ff9800", "medium": "#2196f3", "low": "#4caf50"}
+    
+    vuln_rows = ""
+    for v in vulns:
+        color = sev_colors.get(v.severity.value if v.severity else "medium", "#9e9e9e")
+        vuln_rows += f"""
+        <tr>
+          <td style="color:{color};font-weight:bold;text-transform:uppercase">{v.severity.value if v.severity else 'N/A'}</td>
+          <td><code style="font-size:11px">{v.file_path or ''}</code> L{v.line_number or '?'}</td>
+          <td>{v.issue}</td>
+          <td style="font-size:12px">{v.suggested_fix or ''}</td>
+        </tr>"""
+
+    score = scan.security_score or 0
+    score_color = "#4caf50" if score >= 80 else "#ff9800" if score >= 50 else "#f44336"
+    scan_date = scan.completed_at or scan.scan_time
+    
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ARK Security Report — {scan.repository.full_name}</title>
+<style>
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #0a0a0f; color: #e2e8f0; }}
+  .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 16px; padding: 32px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.1); }}
+  .score {{ font-size: 64px; font-weight: 900; color: {score_color}; }}
+  table {{ width: 100%; border-collapse: collapse; background: #1a1a2e; border-radius: 12px; overflow: hidden; }}
+  th {{ background: rgba(255,255,255,0.05); padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }}
+  td {{ padding: 12px 16px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; vertical-align: top; }}
+  .stat {{ display: inline-block; background: rgba(255,255,255,0.05); border-radius: 8px; padding: 12px 20px; margin: 8px; text-align: center; }}
+  .stat-num {{ font-size: 28px; font-weight: 700; }}
+  .stat-lbl {{ font-size: 11px; color: #94a3b8; text-transform: uppercase; margin-top: 4px; }}
+  .branding {{ text-align: center; margin-top: 40px; color: #4a5568; font-size: 12px; }}
+  @media print {{ body {{ background: white; color: black; }} .header {{ background: #f8fafc; color: black; }} }}
+</style>
+</head>
+<body>
+<div class="header">
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
+    <div>
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#94a3b8;margin-bottom:8px">⚡ ARK DevSecOps AI — Security Report</div>
+      <h1 style="margin:0;font-size:28px">{scan.repository.full_name}</h1>
+      <p style="margin:8px 0 0;color:#94a3b8">Scan #{scan.id} • {scan_date.strftime('%B %d, %Y') if scan_date else 'Unknown date'}</p>
+    </div>
+    <div style="text-align:right">
+      <div class="score">{int(score)}%</div>
+      <div style="color:#94a3b8;font-size:13px">Security Score</div>
+    </div>
+  </div>
+  <div style="margin-top:24px">
+    <span class="stat"><div class="stat-num" style="color:#f44336">{scan.critical_count}</div><div class="stat-lbl">Critical</div></span>
+    <span class="stat"><div class="stat-num" style="color:#ff9800">{scan.high_count}</div><div class="stat-lbl">High</div></span>
+    <span class="stat"><div class="stat-num" style="color:#2196f3">{scan.medium_count}</div><div class="stat-lbl">Medium</div></span>
+    <span class="stat"><div class="stat-num" style="color:#4caf50">{scan.low_count}</div><div class="stat-lbl">Low</div></span>
+    <span class="stat"><div class="stat-num">{scan.total_vulnerabilities}</div><div class="stat-lbl">Total</div></span>
+  </div>
+</div>
+
+<h2 style="color:#94a3b8;font-size:14px;text-transform:uppercase;letter-spacing:1px">Vulnerability Details</h2>
+<table>
+  <thead><tr><th>Severity</th><th>Location</th><th>Issue</th><th>Recommended Fix</th></tr></thead>
+  <tbody>{vuln_rows if vuln_rows else '<tr><td colspan="4" style="text-align:center;padding:40px;color:#94a3b8">No vulnerabilities found — congratulations! 🎉</td></tr>'}</tbody>
+</table>
+
+<div class="branding">Generated by ARK DevSecOps AI • {scan_date.strftime('%Y-%m-%d %H:%M UTC') if scan_date else ''}</div>
+</body></html>"""
+
+    return HTMLResponse(
+        content=html,
+        headers={"Content-Disposition": f'attachment; filename="ark-report-{scan_id}.html"'},
+    )
+
+
+# ── Slack Webhook Test ───────────────────────────────────────────────────────
+
+class SlackTestRequest(BaseModel):
+    webhook_url: str
+
+
+@router.post(
+    "/notifications/test-slack",
+    summary="Test Slack Webhook",
+)
+async def test_slack_webhook(
+    body: SlackTestRequest,
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Send a test notification to a Slack webhook URL."""
+    import httpx
+    if not body.webhook_url.startswith("https://hooks.slack.com/"):
+        raise HTTPException(status_code=400, detail="Invalid Slack webhook URL.")
+    
+    payload = {
+        "text": f":white_check_mark: ARK DevSecOps AI connected! Scan alerts will be sent here.",
+        "blocks": [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*⚡ ARK DevSecOps AI* — Slack integration active!\nSecurity scan alerts will be delivered here for *{current_user.login or current_user.email or 'your account'}*.",
+                },
+            }
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(body.webhook_url, json=payload)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Slack returned HTTP {resp.status_code}: {resp.text}")
+        return {"status": "ok", "message": "Test notification sent to Slack."}
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to reach Slack: {exc}")
+
