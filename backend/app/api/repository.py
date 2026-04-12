@@ -232,7 +232,7 @@ def list_repositories(
             "total_scans": repo.total_scans or 0,
             "last_scanned_at": repo.last_scanned_at,
             "security_score": latest_scan.security_score if latest_scan else None,
-            "scan_status": latest_scan.status.value if latest_scan else "never_scanned",
+            "scan_status": (latest_scan.status.value if hasattr(latest_scan.status, "value") else latest_scan.status) if latest_scan else "never_scanned",
             "latest_scan_id": latest_scan.id if latest_scan else None,
         }
         result.append(item)
