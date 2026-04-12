@@ -147,9 +147,8 @@ def get_vulnerability_report(
             )
 
     from sqlalchemy import case
-    from app.models.vulnerability import Severity as SevEnum
     severity_order = case(
-        {SevEnum.CRITICAL: 0, SevEnum.HIGH: 1, SevEnum.MEDIUM: 2, SevEnum.LOW: 3, SevEnum.INFO: 4},
+        {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4},
         value=Vulnerability.severity,
     )
     vulns = vuln_query.order_by(severity_order).limit(limit).all()
@@ -157,17 +156,23 @@ def get_vulnerability_report(
     # Parse stored JSON fields safely
     ai_recs = None
     if scan.ai_recommendations:
-        try:
-            ai_recs = json.loads(scan.ai_recommendations)
-        except json.JSONDecodeError:
-            ai_recs = {"security_assessment": scan.ai_recommendations}
+        if isinstance(scan.ai_recommendations, dict):
+            ai_recs = scan.ai_recommendations
+        else:
+            try:
+                ai_recs = json.loads(scan.ai_recommendations)
+            except (json.JSONDecodeError, TypeError):
+                ai_recs = {"security_assessment": str(scan.ai_recommendations)}
 
     frameworks: list[str] = []
     if scan.detected_frameworks:
-        try:
-            frameworks = json.loads(scan.detected_frameworks)
-        except json.JSONDecodeError:
-            frameworks = []
+        if isinstance(scan.detected_frameworks, list):
+            frameworks = scan.detected_frameworks
+        else:
+            try:
+                frameworks = json.loads(scan.detected_frameworks)
+            except (json.JSONDecodeError, TypeError):
+                frameworks = []
 
     vuln_items = [
         {
@@ -194,8 +199,8 @@ def get_vulnerability_report(
         "scan_id": scan.id,
         "repository_name": scan.repository.full_name,
         "repository_url": scan.repository.url,
-        "scan_time": scan.scan_time.isoformat(),
-        "completed_at": scan.completed_at.isoformat() if scan.completed_at else None,
+        "scan_time": scan.scan_time.isoformat() if hasattr(scan.scan_time, "isoformat") else str(scan.scan_time),
+        "completed_at": scan.completed_at.isoformat() if hasattr(scan.completed_at, "isoformat") else (str(scan.completed_at) if scan.completed_at else None),
         "status": scan.status.value if hasattr(scan.status, "value") else scan.status,
         "security_score": scan.security_score,
         "total_vulnerabilities": scan.total_vulnerabilities,
