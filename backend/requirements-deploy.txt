@@ -1,11 +1,11 @@
-# ARK DevSecOps AI — deployment requirements
-# This strips llama-cpp-python (needs C++ build) + test packages for cloud deploy
+# ARK DevSecOps AI — Cloud deploy requirements
+# Python 3.11 required (set PYTHON_VERSION=3.11.9 in Render env vars)
 
 # ── Core Framework ────────────────────────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4
-pydantic-core==2.27.2       # pinned — ensures pre-built wheel, avoids Rust compile
+pydantic-core==2.27.2
 pydantic-settings==2.7.0
 python-multipart==0.0.20
 
@@ -27,7 +27,6 @@ gitpython==3.1.43
 
 # ── AI Integration ────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
-# llama-cpp-python is EXCLUDED — Mythos falls back to Heuristic tier on cloud
 huggingface-hub==0.27.0
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
