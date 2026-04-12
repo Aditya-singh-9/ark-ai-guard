@@ -73,14 +73,15 @@ const HeroSection = () => {
               transition={{ duration: 0.6, delay: 0.3 }}
               className="flex flex-col sm:flex-row gap-3"
             >
-              <Button
-                size="lg"
-                className="bg-primary text-primary-foreground hover:bg-primary/90 neon-glow font-semibold px-8 h-12 text-base gap-2"
-                onClick={() => { window.location.href = githubOAuthUrl(); }}
-              >
-                <GitBranch className="w-5 h-5" />
-                Connect GitHub
-              </Button>
+              <Link to="/login">
+                <Button
+                  size="lg"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 neon-glow font-semibold px-8 h-12 text-base gap-2"
+                >
+                  <GitBranch className="w-5 h-5" />
+                  Connect GitHub
+                </Button>
+              </Link>
               <Link to="/dashboard">
                 <Button
                   size="lg"

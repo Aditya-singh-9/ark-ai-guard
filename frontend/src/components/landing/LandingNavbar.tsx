@@ -46,22 +46,30 @@ const LandingNavbar = () => {
           </a>
         </div>
 
-        <div className="hidden md:flex items-center gap-2">
-          <Link to="/dashboard">
-            <Button variant="ghost" size="sm" className="font-medium">Dashboard</Button>
-          </Link>
+        <div className="hidden md:flex items-center gap-3">
           {user ? (
-            <Button size="sm" variant="outline" className="font-medium" onClick={logout}>
-              Logout ({user.username})
-            </Button>
+            <>
+              <Link to="/dashboard">
+                <Button variant="ghost" size="sm" className="font-medium hover:bg-white/5">Dashboard</Button>
+              </Link>
+              <Button size="sm" variant="outline" className="font-medium text-red-400 border-red-500/20 hover:bg-red-500/10" onClick={logout}>
+                Logout ({user.username})
+              </Button>
+            </>
           ) : (
-            <Button
-              size="sm"
-              className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium neon-glow-sm"
-              onClick={() => { window.location.href = githubOAuthUrl(); }}
-            >
-              Connect GitHub
-            </Button>
+            <>
+              <Link to="/login">
+                <Button variant="ghost" size="sm" className="font-medium hover:bg-white/5">Sign In</Button>
+              </Link>
+              <Link to="/login">
+                <Button
+                  size="sm"
+                  className="bg-primary text-primary-foreground hover:bg-primary/90 font-medium neon-glow-sm"
+                >
+                  Connect GitHub
+                </Button>
+              </Link>
+            </>
           )}
         </div>
 
@@ -94,9 +102,16 @@ const LandingNavbar = () => {
                   {item}
                 </a>
               ))}
-              <Link to="/dashboard" onClick={() => setMenuOpen(false)}>
+              {!user && (
+                <Link to="/login" onClick={() => setMenuOpen(false)}>
+                  <Button variant="ghost" className="w-full mt-2 justify-start font-medium hover:bg-white/5">
+                    Sign In
+                  </Button>
+                </Link>
+              )}
+              <Link to={user ? "/dashboard" : "/login"} onClick={() => setMenuOpen(false)}>
                 <Button className="w-full mt-2 bg-primary text-primary-foreground hover:bg-primary/90">
-                  Open Dashboard
+                  {user ? "Open Dashboard" : "Connect GitHub"}
                 </Button>
               </Link>
             </div>
