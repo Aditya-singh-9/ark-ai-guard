@@ -1,9 +1,6 @@
 {
-  "name": "ark-ai-guard-frontend",
-  "version": "0.1.0",
+  "framework": "vite",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "installCommand": "npm install",
-  "framework": "vite",
-  "rootDirectory": "frontend"
+  "installCommand": "npm install"
 }
