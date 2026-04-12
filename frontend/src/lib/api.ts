@@ -316,7 +316,7 @@ export async function getRepoTrends(repoId: number): Promise<ScanTrends> {
 
 /** Return the base API URL for direct download links (SBOM, report). */
 export function getApiBase(): string {
-  return (import.meta.env.VITE_API_URL as string) || "http://localhost:8000/api/v1";
+  return API_BASE;
 }
 
 /** Download the SBOM for a repo (returns a direct download URL). */
