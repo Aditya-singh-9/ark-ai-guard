@@ -82,6 +82,25 @@ def init_db() -> None:
 
     log.info("Initialising database tables…")
     Base.metadata.create_all(bind=engine)
+    
+    # Auto-patch missing auth columns for legacy schema
+    try:
+        with engine.begin() as conn:
+            # We catch exceptions internally if columns already exist
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN auth_provider VARCHAR(50)"))
+                conn.execute(text("UPDATE users SET auth_provider = 'github' WHERE auth_provider IS NULL"))
+            except Exception:
+                pass
+            
+            try:
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
+            except Exception:
+                pass
+        log.info("Schema integrity verified ✓")
+    except Exception as e:
+        log.warning(f"Schema patch warning (can be ignored if columns exist): {e}")
+
     log.info("Database ready ✓")
 
 

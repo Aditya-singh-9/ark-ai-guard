@@ -42,12 +42,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not settings.GITHUB_WEBHOOK_SECRET:
         log.warning("SECURITY WARNING: GITHUB_WEBHOOK_SECRET is not set — webhook verification disabled!")
 
-    # Initialise database tables
+    # Initialise database tables + Auto-patch schemas
     try:
         init_db()
     except Exception as exc:
-        log.error(f"Database initialisation failed: {exc}")
-        # Don't crash — DB might not be ready yet in Docker Compose
+        log.error(f"Database initialisation or migration failed: {exc}")
+        # Don't crash immediately — DB might not be ready yet in Docker Compose
         log.warning("Continuing startup without DB — some endpoints will fail")
 
     log.info("Application startup complete ✓")
