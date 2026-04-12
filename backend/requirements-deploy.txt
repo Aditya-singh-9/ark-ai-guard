@@ -5,6 +5,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4
+pydantic-core==2.27.2       # pinned — ensures pre-built wheel, avoids Rust compile
 pydantic-settings==2.7.0
 python-multipart==0.0.20
 
