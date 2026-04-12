@@ -1,5 +1,5 @@
 """
-ARK DevSecOps AI — FastAPI Application Entry Point
+DevScops Guard — FastAPI Application Entry Point
 
 Registers all routers, configures middleware, and handles application lifecycle.
 """
@@ -148,7 +148,7 @@ def create_app() -> FastAPI:
         return {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,
-            "engine": "ARK Nexus Engine™ + Mythos™ AI",
+            "engine": "DevScops Nexus Engine + Mythos AI",
             "models": ["Mythos (offline)", "Gemini (online)"],
             "layers": 7,
             "features": [

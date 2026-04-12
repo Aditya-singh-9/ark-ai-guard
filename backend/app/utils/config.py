@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     )
 
     # ── Application ──────────────────────────────────────────────────────────
-    APP_NAME: str = "ARK DevSecOps AI"
+    APP_NAME: str = "DevScops Guard"
     APP_VERSION: str = "1.0.0"
     APP_ENV: str = "development"  # development | production | testing
     DEBUG: bool = True

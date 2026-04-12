@@ -5,7 +5,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { githubOAuthUrl } from "@/lib/api";
 import { toast } from "sonner";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
+const configUrl = import.meta.env.VITE_API_URL;
+const API_BASE = configUrl 
+  ? (configUrl.endsWith("/api/v1") ? configUrl : `${configUrl.replace(/\/$/, "")}/api/v1`)
+  : "http://localhost:8000/api/v1";
 
 export default function LoginPage() {
   const navigate = useNavigate();
