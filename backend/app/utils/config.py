@@ -56,11 +56,23 @@ class Settings(BaseSettings):
 
     # ── CORS / Frontend ───────────────────────────────────────────────────────
     FRONTEND_URL: str = "http://localhost:8080"
-    ALLOWED_ORIGINS: list[str] = [
-        "http://localhost:8080",
-        "http://localhost:5173",
-        "http://127.0.0.1:8080",
-    ]
+    ALLOWED_ORIGINS: str = (
+        "http://localhost:8080,"
+        "http://localhost:5173,"
+        "http://127.0.0.1:8080"
+    )
+
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        """Parse ALLOWED_ORIGINS from either comma-separated or JSON array string."""
+        import json
+        val = self.ALLOWED_ORIGINS.strip()
+        if val.startswith("["):
+            try:
+                return json.loads(val)
+            except json.JSONDecodeError:
+                pass
+        return [o.strip() for o in val.split(",") if o.strip()]
 
     # ── Rate Limiting ─────────────────────────────────────────────────────────
     RATE_LIMIT_PER_MINUTE: int = 60
