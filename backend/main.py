@@ -82,12 +82,22 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         log.error(f"Unhandled exception on {request.method} {request.url}: {exc}", exc_info=True)
+        
+        # Attach CORS headers so browsers do not block 500 errors
+        origin = request.headers.get("origin")
+        headers = {}
+        if origin in settings.allowed_origins_list or "*" in settings.allowed_origins_list:
+            headers["Access-Control-Allow-Origin"] = origin if origin in settings.allowed_origins_list else "*"
+            headers["Access-Control-Allow-Credentials"] = "true"
+        
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
                 "detail": "An internal server error occurred.",
+                "error_message": str(exc),
                 "path": str(request.url),
             },
+            headers=headers
         )
 
     # ── Middleware ────────────────────────────────────────────────────────────

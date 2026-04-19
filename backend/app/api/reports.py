@@ -147,8 +147,12 @@ def get_vulnerability_report(
             )
 
     from sqlalchemy import case
+    from app.models.vulnerability import Severity
     severity_order = case(
-        {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4},
+        {
+            "critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4,
+            Severity.CRITICAL: 0, Severity.HIGH: 1, Severity.MEDIUM: 2, Severity.LOW: 3, Severity.INFO: 4
+        },
         value=Vulnerability.severity,
     )
     vulns = vuln_query.order_by(severity_order).limit(limit).all()
@@ -160,7 +164,11 @@ def get_vulnerability_report(
             ai_recs = scan.ai_recommendations
         else:
             try:
-                ai_recs = json.loads(scan.ai_recommendations)
+                parsed = json.loads(scan.ai_recommendations)
+                if isinstance(parsed, dict):
+                    ai_recs = parsed
+                else:
+                    ai_recs = {"security_assessment": str(scan.ai_recommendations)}
             except (json.JSONDecodeError, TypeError):
                 ai_recs = {"security_assessment": str(scan.ai_recommendations)}
 
@@ -170,7 +178,11 @@ def get_vulnerability_report(
             frameworks = scan.detected_frameworks
         else:
             try:
-                frameworks = json.loads(scan.detected_frameworks)
+                parsed_fw = json.loads(scan.detected_frameworks)
+                if isinstance(parsed_fw, list):
+                    frameworks = [str(fw) for fw in parsed_fw]
+                else:
+                    frameworks = [str(parsed_fw)]
             except (json.JSONDecodeError, TypeError):
                 frameworks = []
 
@@ -472,36 +484,43 @@ def get_sbom(
         raise HTTPException(status_code=404, detail="Repository not found")
 
     repo_path = repo_cloner.get_repo_path(repo.full_name)
-    if not repo_path:
-        raise HTTPException(status_code=404, detail="Repository not cloned yet. Run a scan first.")
-
     sbom_format = "cyclonedx" if format != "spdx" else "spdx-json"
+    sbom_content = ""
     
-    try:
-        result = subprocess.run(
-            ["trivy", "fs", "--format", sbom_format, "--no-progress", "--quiet", repo_path],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        sbom_content = result.stdout or "{}"
-    except FileNotFoundError:
-        # Trivy not installed — generate a basic SBOM from scan data
+    if repo_path:
+        try:
+            result = subprocess.run(
+                ["trivy", "fs", "--format", sbom_format, "--no-progress", "--quiet", repo_path],
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            sbom_content = result.stdout or ""
+        except FileNotFoundError:
+            pass
+
+    if not repo_path or not sbom_content:
+        # Trivy not installed or repo not cloned locally — generate a basic SBOM from scan data
         latest_scan = (
             db.query(ScanReport)
             .filter(ScanReport.repository_id == repo_id, ScanReport.status == ScanStatus.COMPLETED)
             .order_by(ScanReport.id.desc()).first()
         )
+        if not latest_scan:
+            raise HTTPException(status_code=404, detail="No scan data available to generate SBOM")
+
         vulns = db.query(Vulnerability).filter(
-            Vulnerability.scan_id == latest_scan.id if latest_scan else False
-        ).all() if latest_scan else []
+            Vulnerability.scan_id == latest_scan.id
+        ).all()
         
         components = [
             {"type": "library", "name": v.package_name, "version": v.package_version or "unknown"}
             for v in vulns if v.package_name
         ]
+        
+        bom_format_name = "CycloneDX" if format == "cyclonedx" else "SPDX"
         sbom_content = json.dumps({
-            "bomFormat": "CycloneDX",
+            "bomFormat": bom_format_name,
             "specVersion": "1.4",
             "metadata": {"component": {"name": repo.full_name, "type": "application"}},
             "components": components,

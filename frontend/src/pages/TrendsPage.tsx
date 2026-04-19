@@ -120,11 +120,11 @@ const TrendChart = ({ trend }: { trend: TrendPoint[] }) => {
               </linearGradient>
             </defs>
             <path
-              d={`M ${scores.map((s, i) => `${(i / (scores.length - 1)) * 590 + 5},${115 - s * 1.05}`).join(" L ")} L ${590 + 5},115 L 5,115 Z`}
+              d={`M ${scores.map((s, i) => `${(i / Math.max(1, scores.length - 1)) * 590 + 5},${115 - s * 1.05}`).join(" L ")} L ${590 + 5},115 L 5,115 Z`}
               fill="url(#score-grad)"
             />
             <polyline
-              points={scores.map((s, i) => `${(i / (scores.length - 1)) * 590 + 5},${115 - s * 1.05}`).join(" ")}
+              points={scores.map((s, i) => `${(i / Math.max(1, scores.length - 1)) * 590 + 5},${115 - s * 1.05}`).join(" ")}
               fill="none"
               stroke="#22c55e"
               strokeWidth="2"
@@ -135,7 +135,7 @@ const TrendChart = ({ trend }: { trend: TrendPoint[] }) => {
             {trend.map((p, i) => (
               <circle
                 key={i}
-                cx={(i / (scores.length - 1)) * 590 + 5}
+                cx={(i / Math.max(1, scores.length - 1)) * 590 + 5}
                 cy={115 - (p.security_score ?? 0) * 1.05}
                 r={hoveredIndex === i ? 5 : 3}
                 fill={scoreBg(p.security_score)}
