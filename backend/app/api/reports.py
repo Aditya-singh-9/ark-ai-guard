@@ -701,7 +701,7 @@ async def test_slack_webhook(
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*⚡ ARK DevSecOps AI* — Slack integration active!\nSecurity scan alerts will be delivered here for *{current_user.login or current_user.email or 'your account'}*.",
+                    "text": f"*⚡ ARK DevSecOps AI* — Slack integration active!\nSecurity scan alerts will be delivered here for *{current_user.username or current_user.email or 'your account'}*.",
                 },
             }
         ],

@@ -205,21 +205,44 @@ def list_repositories(
     current_user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Return all repositories connected by the authenticated user, enriched with latest scan info."""
+    from sqlalchemy import func as sqlfunc
+
     repos = (
         db.query(Repository)
         .filter(Repository.user_id == current_user.id)
         .order_by(Repository.id.desc())
         .all()
     )
+    if not repos:
+        return []
+
+    repo_ids = [r.id for r in repos]
+
+    # ── Batch fetch latest scan per repo in ONE query ──────────────────────
+    # Find the max scan id per repository (latest scan)
+    latest_scan_ids_subq = (
+        db.query(
+            ScanReport.repository_id,
+            sqlfunc.max(ScanReport.id).label("max_id"),
+        )
+        .filter(ScanReport.repository_id.in_(repo_ids))
+        .group_by(ScanReport.repository_id)
+        .subquery()
+    )
+    latest_scans = (
+        db.query(ScanReport)
+        .join(
+            latest_scan_ids_subq,
+            ScanReport.id == latest_scan_ids_subq.c.max_id,
+        )
+        .all()
+    )
+    # Build lookup: repo_id -> latest ScanReport
+    scan_by_repo: dict[int, ScanReport] = {s.repository_id: s for s in latest_scans}
+
     result = []
     for repo in repos:
-        # Get the latest completed scan for enrichment
-        latest_scan = (
-            db.query(ScanReport)
-            .filter(ScanReport.repository_id == repo.id)
-            .order_by(ScanReport.id.desc())
-            .first()
-        )
+        latest_scan = scan_by_repo.get(repo.id)
         item = {
             "id": repo.id,
             "name": repo.name,
@@ -232,11 +255,15 @@ def list_repositories(
             "total_scans": repo.total_scans or 0,
             "last_scanned_at": repo.last_scanned_at,
             "security_score": latest_scan.security_score if latest_scan else None,
-            "scan_status": (latest_scan.status.value if hasattr(latest_scan.status, "value") else latest_scan.status) if latest_scan else "never_scanned",
+            "scan_status": (
+                (latest_scan.status.value if hasattr(latest_scan.status, "value") else latest_scan.status)
+                if latest_scan else "never_scanned"
+            ),
             "latest_scan_id": latest_scan.id if latest_scan else None,
         }
         result.append(item)
     return result
+
 
 
 @router.get(

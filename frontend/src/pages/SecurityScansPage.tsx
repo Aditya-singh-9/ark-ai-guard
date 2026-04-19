@@ -411,6 +411,7 @@ const SecurityScansPage = () => {
   const [search, setSearch] = useState("");
   const [showScanModal, setShowScanModal] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<number | null>(null);
+  const [hasActiveScans, setHasActiveScans] = useState(false);
   // Map of repoId -> activeScanId started from the modal
   const [modalScanIds, setModalScanIds] = useState<Record<number, number>>({});
   const queryClient = useQueryClient();
@@ -418,15 +419,17 @@ const SecurityScansPage = () => {
   const { data: stats, isLoading } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: getDashboardStats,
-    refetchInterval: 8000,
-    staleTime: 0,
+    // Poll faster when scans are running, slower otherwise
+    refetchInterval: hasActiveScans ? 5000 : 15000,
+    staleTime: 4000,
   });
 
   const { data: repos = [] } = useQuery({
     queryKey: ["repositories"],
     queryFn: getRepositories,
-    staleTime: 0,
+    staleTime: 10000,  // Repo list rarely changes — don't refetch more than every 10s
   });
+
 
   const scanMutation = useMutation({
     mutationFn: (repoId: number) => scanRepository(repoId),
@@ -434,6 +437,7 @@ const SecurityScansPage = () => {
       toast.success(`🔍 Scan #${data.scan_id} started!`);
       setModalScanIds((prev) => ({ ...prev, [repoId]: data.scan_id }));
       setShowScanModal(false);
+      setHasActiveScans(true);
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -452,6 +456,11 @@ const SecurityScansPage = () => {
   const hasRunning = repoScans.some(
     (r) => r.scan_status === "running" || r.scan_status === "pending"
   );
+
+  // Sync hasActiveScans state from real data
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  if (hasRunning !== hasActiveScans) setHasActiveScans(hasRunning);
+
 
   return (
     <>

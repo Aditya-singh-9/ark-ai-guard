@@ -1,11 +1,7 @@
-# ARK DevSecOps AI — Cloud deploy requirements
-# Python 3.11 required (set PYTHON_VERSION=3.11.9 in Render env vars)
-
 # ── Core Framework ────────────────────────────────────────────────────────────
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 pydantic==2.10.4
-pydantic-core==2.27.2
 pydantic-settings==2.7.0
 python-multipart==0.0.20
 
@@ -27,13 +23,11 @@ gitpython==3.1.43
 
 # ── AI Integration ────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
-huggingface-hub==0.27.0
+# NOTE: llama-cpp-python is excluded from production — requires C++ build tools
+# which are not available on Render/Vercel. Mythos uses offline rule engine instead.
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 slowapi==0.1.9
-
-# ── Redis (JWT denylist) ──────────────────────────────────────────────────────
-redis==5.2.0
 
 # ── Utilities ─────────────────────────────────────────────────────────────────
 python-dotenv==1.0.1

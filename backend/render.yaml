@@ -1,0 +1,56 @@
+# render.yaml — Render.com deployment config for ARK AI Guard backend
+# Commit this file to your repo root and Render will pick it up automatically.
+
+services:
+  - type: web
+    name: ark-ai-guard-api
+    runtime: python
+    region: singapore  # or 'oregon', 'frankfurt' — pick closest to your users
+    plan: starter       # or 'standard' for more RAM (needed for scans)
+    buildCommand: pip install -r requirements-deploy.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2 --loop uvloop --log-level info
+    rootDir: backend
+    healthCheckPath: /health
+
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEBUG
+        value: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ark-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true   # Render auto-generates a secure random value
+      - key: ENCRYPTION_KEY
+        value: dGhpcytuZWVkcy10by1iZS0zMi1ieXRlcy1sb25nLS0tLS0tLS0=
+      - key: GITHUB_CLIENT_ID
+        value: Ov23li7v3bY1iFPfBHxp
+      - key: GITHUB_CLIENT_SECRET
+        sync: false  # Set manually in Render dashboard (sensitive)
+      - key: GITHUB_REDIRECT_URI
+        value: https://www.devscops.xyz/auth/callback
+      - key: FRONTEND_URL
+        value: https://www.devscops.xyz
+      - key: ALLOWED_ORIGINS
+        value: https://www.devscops.xyz,https://devscops.xyz
+      - key: GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard (sensitive)
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: SCAN_TEMP_DIR
+        value: /tmp/ark-scans
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 1440
+      - key: RATE_LIMIT_PER_MINUTE
+        value: 60
+      - key: RATE_LIMIT_SCAN_PER_HOUR
+        value: 10
+
+databases:
+  - name: ark-postgres
+    databaseName: ark_db
+    user: ark_user
+    plan: starter         # Free tier PostgreSQL on Render
+    ipAllowList: []       # Allow all — Render services connect internally
