@@ -93,6 +93,13 @@ class Settings(BaseSettings):
     # Set to redis://localhost:6379/0 to enable distributed JWT revocation
     REDIS_URL: str = ""  # Empty = use in-memory denylist (single-process only)
 
+    # ── Email / SMTP ──────────────────────────────────────────────────────────
+    SMTP_SERVER: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str | None = None
+    SMTP_PASSWORD: str | None = None
+    SMTP_FROM_EMAIL: str | None = None
+
 
 @lru_cache()
 def get_settings() -> Settings:

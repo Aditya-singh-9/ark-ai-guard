@@ -565,3 +565,190 @@ async def create_scan_autofix_pr(
     except Exception as e:
         log.error(f"Error creating PR: {e}")
         raise HTTPException(status_code=500, detail="Failed to create Auto-Fix PR")
+
+
+# ── Public Scan Endpoints (no auth required) ──────────────────────────────────
+
+class SnippetScanRequest(BaseModel):
+    code: str
+    language: str = "python"
+
+
+VULN_PATTERNS = [
+    {"pattern": r"eval\s*\(", "title": "Code Injection via eval()", "severity": "critical",
+     "description": "Use of eval() can execute arbitrary code. Replace with safe alternatives like ast.literal_eval()."},
+    {"pattern": r"innerHTML\s*=", "title": "XSS via innerHTML", "severity": "high",
+     "description": "Setting innerHTML with user data enables XSS attacks. Use textContent or sanitize input."},
+    {"pattern": r"(?i)(password|secret|api_key|token|passwd)\s*=\s*['\"][^'\"]{8,}", "title": "Hardcoded Secret Detected", "severity": "critical",
+     "description": "Secrets must be stored in environment variables, not in source code."},
+    {"pattern": r"(?i)(MD5|SHA1|md5\(|sha1\()", "title": "Weak Cryptographic Hash", "severity": "high",
+     "description": "MD5/SHA1 are cryptographically broken. Use SHA-256, bcrypt, or Argon2 for passwords."},
+    {"pattern": r"(?i)SELECT\s+\*?\s+FROM.*(\$\{|'\s*\+)", "title": "SQL Injection Risk", "severity": "critical",
+     "description": "String concatenation in SQL queries allows injection. Use parameterized queries."},
+    {"pattern": r"(?i)(exec|system|shell_exec)\s*\(|subprocess\.call.*shell=True", "title": "Command Injection Risk", "severity": "critical",
+     "description": "Unvalidated input in shell commands allows command injection attacks."},
+    {"pattern": r"\.unwrap\(\)", "title": "Unhandled Error (unwrap)", "severity": "medium",
+     "description": "unwrap() panics on None/Err. Use proper error handling with match or ?."},
+    {"pattern": r"pickle\.loads|yaml\.load\s*\([^,]+\)", "title": "Deserialization Vulnerability", "severity": "high",
+     "description": "Unsafe deserialization can lead to Remote Code Execution. Use safe loaders."},
+    {"pattern": r"(?i)http://(?!localhost|127\.0\.0\.1)", "title": "Insecure HTTP URL", "severity": "low",
+     "description": "Using plain HTTP exposes data to man-in-the-middle attacks. Use HTTPS."},
+    {"pattern": r"(?i)verify\s*=\s*False", "title": "SSL Verification Disabled", "severity": "high",
+     "description": "Disabling SSL certificate verification makes connections vulnerable to MITM attacks."},
+]
+
+
+def _scan_code_patterns(code: str, language: str) -> dict:
+    import re
+    vulns = []
+    lines = code.split("\n")
+    for p in VULN_PATTERNS:
+        regex = re.compile(p["pattern"])
+        for i, line in enumerate(lines):
+            if regex.search(line):
+                vulns.append({
+                    "severity": p["severity"],
+                    "title": p["title"],
+                    "description": p["description"],
+                    "line": i + 1,
+                    "code_snippet": line.strip()[:120],
+                })
+    critical = sum(1 for v in vulns if v["severity"] == "critical")
+    high = sum(1 for v in vulns if v["severity"] == "high")
+    medium = sum(1 for v in vulns if v["severity"] == "medium")
+    score = max(0, 100 - (critical * 20) - (high * 10) - (medium * 5) - (len(vulns) * 2))
+    return {
+        "score": score,
+        "language": language,
+        "total_lines": len(lines),
+        "vulnerabilities": vulns,
+        "critical_count": critical,
+        "high_count": high,
+        "medium_count": medium,
+        "low_count": sum(1 for v in vulns if v["severity"] == "low"),
+    }
+
+
+@router.post(
+    "/scan/snippet",
+    summary="Public Code Snippet Scan (no auth required)",
+    tags=["Public Scanning"],
+)
+@limiter.limit("30/minute")
+async def scan_snippet(
+    request: Request,
+    body: SnippetScanRequest,
+) -> dict:
+    """
+    Scan a code snippet for security vulnerabilities without authentication.
+    Returns severity scores and vulnerability details.
+    """
+    if not body.code or not body.code.strip():
+        raise HTTPException(status_code=400, detail="Code snippet cannot be empty.")
+    if len(body.code) > 200_000:
+        raise HTTPException(status_code=413, detail="Code snippet too large (max 200KB).")
+
+    result = _scan_code_patterns(body.code, body.language)
+    return result
+
+
+@router.post(
+    "/scan/upload",
+    summary="Public ZIP File Scan (no auth required)",
+    tags=["Public Scanning"],
+)
+@limiter.limit("10/minute")
+async def scan_zip_upload(
+    request: Request,
+) -> dict:
+    """
+    Upload a .zip file and scan all code files for security vulnerabilities.
+    No authentication required. Max file size: 10MB.
+    """
+    import io
+    import zipfile
+    from fastapi import UploadFile, File
+
+    # Read multipart body manually
+    form = await request.form()
+    file_field = form.get("file")
+    if not file_field:
+        raise HTTPException(status_code=400, detail="No file uploaded. Send a .zip file as 'file' field.")
+
+    content = await file_field.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 10MB.")
+
+    if not file_field.filename.endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Only .zip files are supported.")
+
+    CODE_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".php", ".rb", ".cs", ".cpp", ".c", ".h", ".sh", ".yaml", ".yml", ".env", ".sql"}
+    SKIP_DIRS = {"node_modules", ".git", "__pycache__", ".venv", "venv", "dist", "build", ".next"}
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Invalid ZIP file.")
+
+    all_code = []
+    files_scanned = 0
+    files_skipped = 0
+
+    for name in zf.namelist():
+        # Skip directories and unwanted paths
+        parts = name.replace("\\", "/").split("/")
+        if any(d in SKIP_DIRS for d in parts):
+            files_skipped += 1
+            continue
+        ext = "." + name.rsplit(".", 1)[-1].lower() if "." in name else ""
+        if ext not in CODE_EXTENSIONS:
+            files_skipped += 1
+            continue
+        try:
+            raw = zf.read(name)
+            text = raw.decode("utf-8", errors="replace")
+            if len(text) > 50_000:
+                text = text[:50_000]  # cap per-file
+            all_code.append((name, text))
+            files_scanned += 1
+        except Exception:
+            files_skipped += 1
+
+    if not all_code:
+        raise HTTPException(status_code=422, detail="No scannable code files found in the ZIP archive.")
+
+    # Scan each file individually then aggregate
+    import re
+    all_vulns = []
+    for filename, code in all_code:
+        lines = code.split("\n")
+        lang = filename.rsplit(".", 1)[-1].lower() if "." in filename else "unknown"
+        for p in VULN_PATTERNS:
+            regex = re.compile(p["pattern"])
+            for i, line in enumerate(lines):
+                if regex.search(line):
+                    all_vulns.append({
+                        "severity": p["severity"],
+                        "title": p["title"],
+                        "description": p["description"],
+                        "file": filename,
+                        "line": i + 1,
+                        "code_snippet": line.strip()[:120],
+                    })
+
+    critical = sum(1 for v in all_vulns if v["severity"] == "critical")
+    high = sum(1 for v in all_vulns if v["severity"] == "high")
+    medium = sum(1 for v in all_vulns if v["severity"] == "medium")
+    score = max(0, 100 - (critical * 20) - (high * 10) - (medium * 5) - (len(all_vulns) * 2))
+
+    return {
+        "score": score,
+        "files_scanned": files_scanned,
+        "files_skipped": files_skipped,
+        "total_lines": sum(len(code.split("\n")) for _, code in all_code),
+        "vulnerabilities": all_vulns[:200],  # cap returned
+        "critical_count": critical,
+        "high_count": high,
+        "medium_count": medium,
+        "low_count": sum(1 for v in all_vulns if v["severity"] == "low"),
+    }

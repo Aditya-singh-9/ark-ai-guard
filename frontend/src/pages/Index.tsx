@@ -1,6 +1,7 @@
 import LandingNavbar from "@/components/landing/LandingNavbar";
 import HeroSection from "@/components/landing/HeroSection";
 import FeaturesSection from "@/components/landing/FeaturesSection";
+import MythosSection from "@/components/landing/MythosSection";
 import HowItWorksSection from "@/components/landing/HowItWorksSection";
 import PlatformPreview from "@/components/landing/PlatformPreview";
 import TrustSection from "@/components/landing/TrustSection";
@@ -11,6 +12,7 @@ const Index = () => (
     <LandingNavbar />
     <HeroSection />
     <div id="features"><FeaturesSection /></div>
+    <div id="mythos"><MythosSection /></div>
     <div id="how-it-works"><HowItWorksSection /></div>
     <div id="preview"><PlatformPreview /></div>
     <TrustSection />

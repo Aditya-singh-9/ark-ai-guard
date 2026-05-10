@@ -33,20 +33,49 @@ WEBHOOK_SECRET = settings.GITHUB_WEBHOOK_SECRET or settings.GITHUB_CLIENT_SECRET
 
 
 def _verify_signature(payload: bytes, signature: str | None) -> bool:
-    """Verify GitHub webhook HMAC-SHA256 signature."""
-    if not WEBHOOK_SECRET or not signature:
-        return True  # skip verification if no secret configured
+    """
+    Verify GitHub webhook HMAC-SHA256 signature.
+
+    Security policy:
+    - If a GITHUB_WEBHOOK_SECRET is configured, the signature MUST be present and valid.
+    - If no secret is configured AND we are not in production, we allow the request
+      but emit a warning (useful for local dev without a tunnel).
+    - In production with no secret: reject all webhook requests outright.
+    """
+    from app.utils.config import settings
+
+    if not WEBHOOK_SECRET:
+        if settings.APP_ENV == "production":
+            log.error(
+                "[Webhook] GITHUB_WEBHOOK_SECRET is not set in production — "
+                "all webhook requests are being rejected for safety."
+            )
+            return False  # REJECT — never allow unsigned webhooks in production
+        # Dev/test with no secret: warn and permit (developer convenience only)
+        log.warning(
+            "[Webhook] GITHUB_WEBHOOK_SECRET is not configured. "
+            "Request accepted in non-production mode. Set the secret for security."
+        )
+        return True
+
+    if not signature:
+        log.warning("[Webhook] Received webhook without X-Hub-Signature-256 header — rejected.")
+        return False
 
     if not signature.startswith("sha256="):
+        log.warning("[Webhook] Webhook signature has unexpected format — rejected.")
         return False
 
     expected = hmac.new(
         WEBHOOK_SECRET.encode("utf-8"),
         payload,
-        hashlib.sha256
+        hashlib.sha256,
     ).hexdigest()
 
-    return hmac.compare_digest(f"sha256={expected}", signature)
+    result = hmac.compare_digest(f"sha256={expected}", signature)
+    if not result:
+        log.warning("[Webhook] Webhook signature mismatch — possible spoofed request rejected.")
+    return result
 
 
 @router.post("/github")

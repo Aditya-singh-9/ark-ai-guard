@@ -4,7 +4,7 @@
  */
 
 const configUrl = import.meta.env.VITE_API_URL;
-const API_BASE = configUrl 
+export const API_BASE = configUrl 
   ? (configUrl.endsWith("/api/v1") ? configUrl : `${configUrl.replace(/\/$/, "")}/api/v1`)
   : "http://localhost:8000/api/v1";
 
@@ -24,7 +24,7 @@ const GITHUB_CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID ?? "Ov23li7v3bY1i
 const getRedirectUri = () => `${window.location.origin}/auth/callback`;
 
 export const githubOAuthUrl = () =>
-  `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(getRedirectUri())}&scope=repo,user:email`;
+  `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(getRedirectUri())}&scope=repo,user:email,read:user`;
 
 // ── Fetch wrapper ─────────────────────────────────────────────────────────────
 
@@ -66,11 +66,12 @@ async function request<T>(
 
 export interface User {
   id: number;
-  github_id: number;
+  github_id: number | null;  // null for email/password users
   username: string;
   email: string | null;
   display_name: string | null;
   avatar_url: string | null;
+  auth_provider?: string;
   created_at: string;
 }
 

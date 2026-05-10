@@ -487,44 +487,47 @@ def get_sbom(
     sbom_format = "cyclonedx" if format != "spdx" else "spdx-json"
     sbom_content = ""
     
-    if repo_path:
-        try:
-            result = subprocess.run(
-                ["trivy", "fs", "--format", sbom_format, "--no-progress", "--quiet", repo_path],
-                capture_output=True,
-                text=True,
-                timeout=120,
+    try:
+        if repo_path:
+            try:
+                result = subprocess.run(
+                    ["trivy", "fs", "--format", sbom_format, "--no-progress", "--quiet", repo_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                )
+                sbom_content = result.stdout or ""
+            except FileNotFoundError:
+                pass
+
+        if not repo_path or not sbom_content:
+            # Trivy not installed or repo not cloned locally — generate a basic SBOM from scan data
+            latest_scan = (
+                db.query(ScanReport)
+                .filter(ScanReport.repository_id == repo_id, ScanReport.status == ScanStatus.COMPLETED)
+                .order_by(ScanReport.id.desc()).first()
             )
-            sbom_content = result.stdout or ""
-        except FileNotFoundError:
-            pass
+            if not latest_scan:
+                raise HTTPException(status_code=404, detail="No scan data available to generate SBOM")
 
-    if not repo_path or not sbom_content:
-        # Trivy not installed or repo not cloned locally — generate a basic SBOM from scan data
-        latest_scan = (
-            db.query(ScanReport)
-            .filter(ScanReport.repository_id == repo_id, ScanReport.status == ScanStatus.COMPLETED)
-            .order_by(ScanReport.id.desc()).first()
-        )
-        if not latest_scan:
-            raise HTTPException(status_code=404, detail="No scan data available to generate SBOM")
-
-        vulns = db.query(Vulnerability).filter(
-            Vulnerability.scan_id == latest_scan.id
-        ).all()
-        
-        components = [
-            {"type": "library", "name": v.package_name, "version": v.package_version or "unknown"}
-            for v in vulns if v.package_name
-        ]
-        
-        bom_format_name = "CycloneDX" if format == "cyclonedx" else "SPDX"
-        sbom_content = json.dumps({
-            "bomFormat": bom_format_name,
-            "specVersion": "1.4",
-            "metadata": {"component": {"name": repo.full_name, "type": "application"}},
-            "components": components,
-        }, indent=2)
+            vulns = db.query(Vulnerability).filter(
+                Vulnerability.scan_id == latest_scan.id
+            ).all()
+            
+            components = [
+                {"type": "library", "name": v.package_name, "version": v.package_version or "unknown"}
+                for v in vulns if v.package_name
+            ]
+            
+            bom_format_name = "CycloneDX" if format == "cyclonedx" else "SPDX"
+            sbom_content = json.dumps({
+                "bomFormat": bom_format_name,
+                "specVersion": "1.4",
+                "metadata": {"component": {"name": repo.full_name, "type": "application"}},
+                "components": components,
+            }, indent=2)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"SBOM generation failed: {exc}")
 
@@ -547,11 +550,16 @@ def get_sbom(
 def get_security_badge(
     repo_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """Return a Shields.io-style SVG badge showing the security score."""
+    """Return a Shields.io-style SVG badge showing the security score.
+    
+    Requires authentication so that security scores cannot be enumerated
+    by unauthenticated actors probing sequential repository IDs.
+    """
     repo = (
         db.query(Repository)
-        .filter(Repository.id == repo_id)
+        .filter(Repository.id == repo_id, Repository.user_id == current_user.id)
         .first()
     )
     latest_scan = (
@@ -608,6 +616,8 @@ def download_html_report(
     current_user: User = Depends(get_current_user),
 ):
     """Generate and download a full HTML security report for a scan."""
+    import html as html_escape_module
+
     scan = (
         db.query(ScanReport)
         .options(joinedload(ScanReport.repository))
@@ -619,30 +629,37 @@ def download_html_report(
         raise HTTPException(status_code=404, detail="Scan not found")
 
     vulns = db.query(Vulnerability).filter(Vulnerability.scan_id == scan_id).all()
-    
-    sev_colors = {"critical": "#f44336", "high": "#ff9800", "medium": "#2196f3", "low": "#4caf50"}
-    
-    vuln_rows = ""
-    for v in vulns:
-        color = sev_colors.get(v.severity.value if v.severity else "medium", "#9e9e9e")
-        vuln_rows += f"""
-        <tr>
-          <td style="color:{color};font-weight:bold;text-transform:uppercase">{v.severity.value if v.severity else 'N/A'}</td>
-          <td><code style="font-size:11px">{v.file_path or ''}</code> L{v.line_number or '?'}</td>
-          <td>{v.issue}</td>
-          <td style="font-size:12px">{v.suggested_fix or ''}</td>
-        </tr>"""
+
+    e = html_escape_module.escape  # shorthand for HTML-escaping user data
 
     score = scan.security_score or 0
     score_color = "#4caf50" if score >= 80 else "#ff9800" if score >= 50 else "#f44336"
     scan_date = scan.completed_at or scan.scan_time
-    
+    repo_full_name = e(scan.repository.full_name)
+
+    sev_colors = {"critical": "#f44336", "high": "#ff9800", "medium": "#2196f3", "low": "#4caf50"}
+
+    vuln_rows = ""
+    for v in vulns:
+        color = sev_colors.get(v.severity.value if v.severity else "medium", "#9e9e9e")
+        sev_label = e(v.severity.value if v.severity else "N/A")
+        file_path = e(v.file_path or "")
+        issue_text = e(v.issue or "")
+        fix_text = e(v.suggested_fix or "")
+        vuln_rows += f"""
+        <tr>
+          <td style="color:{color};font-weight:bold;text-transform:uppercase">{sev_label}</td>
+          <td><code style="font-size:11px">{file_path}</code> L{e(str(v.line_number or '?'))}</td>
+          <td>{issue_text}</td>
+          <td style="font-size:12px">{fix_text}</td>
+        </tr>"""
+
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ARK Security Report — {scan.repository.full_name}</title>
+<title>ARK Security Report — {repo_full_name}</title>
 <style>
   body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 0; padding: 20px; background: #0a0a0f; color: #e2e8f0; }}
   .header {{ background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 16px; padding: 32px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.1); }}
@@ -662,7 +679,7 @@ def download_html_report(
   <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:16px">
     <div>
       <div style="font-size:11px;text-transform:uppercase;letter-spacing:2px;color:#94a3b8;margin-bottom:8px">⚡ ARK DevSecOps AI — Security Report</div>
-      <h1 style="margin:0;font-size:28px">{scan.repository.full_name}</h1>
+      <h1 style="margin:0;font-size:28px">{repo_full_name}</h1>
       <p style="margin:8px 0 0;color:#94a3b8">Scan #{scan.id} • {scan_date.strftime('%B %d, %Y') if scan_date else 'Unknown date'}</p>
     </div>
     <div style="text-align:right">

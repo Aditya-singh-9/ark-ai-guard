@@ -2,20 +2,23 @@
 Authentication router — GitHub OAuth + JWT issuance + Email/Password auth.
 
 Endpoints:
-  POST /auth/github        Exchange GitHub OAuth code for a JWT
-  POST /auth/register      Register with email + password
-  POST /auth/login         Login with email + password
-  GET  /auth/me            Return current user profile
-  POST /auth/logout        Revoke JWT (server-side denylist)
+  POST /auth/github           Exchange GitHub OAuth code for a JWT
+  POST /auth/register         Register with email + password
+  POST /auth/login            Login with email + password
+  GET  /auth/me               Return current user profile
+  POST /auth/logout           Revoke JWT (server-side denylist)
+  POST /auth/forgot-password  Send a password-reset email
+  POST /auth/reset-password   Validate reset token and set new password
 """
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.database.db import get_db
@@ -57,10 +60,29 @@ class UserResponse(BaseModel):
 
 
 class RegisterRequest(BaseModel):
-    email: str
+    email: EmailStr
     username: str
     password: str
     display_name: Optional[str] = None
+
+
+_PASSWORD_RE = re.compile(
+    r'^(?=.*[A-Z])(?=.*[0-9])(?=.*[!@#$%^&*()_+\-=\[\]{};:\'"\\|,.<>\/?]).{8,}$'
+)
+
+
+def _validate_password_strength(password: str) -> None:
+    """Raise HTTPException 400 if password does not meet complexity requirements."""
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    if not _PASSWORD_RE.match(password):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Password must contain at least one uppercase letter, "
+                "one digit, and one special character (!@#$%^&* etc.)."
+            ),
+        )
 
 
 class EmailLoginRequest(BaseModel):
@@ -283,14 +305,10 @@ async def register(
     db: Session = Depends(get_db),
 ) -> dict:
     """Register a new account with email and password."""
-    from passlib.context import CryptContext
-    import re
+    import bcrypt
 
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-    # Basic validation
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+    # Password strength enforcement (email already validated by EmailStr)
+    _validate_password_strength(body.password)
     if not re.match(r'^[\w.@+-]+$', body.username):
         raise HTTPException(status_code=400, detail="Username contains invalid characters.")
 
@@ -307,7 +325,7 @@ async def register(
         display_name=body.display_name or body.username,
         avatar_url=None,
         auth_provider="email",
-        password_hash=pwd_ctx.hash(body.password),
+        password_hash=bcrypt.hashpw(body.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
         last_login_at=datetime.now(timezone.utc),
     )
     db.add(user)
@@ -341,16 +359,14 @@ async def email_login(
     db: Session = Depends(get_db),
 ) -> dict:
     """Authenticate with email and password."""
-    from passlib.context import CryptContext
-
-    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    import bcrypt
 
     user = db.query(User).filter(
         User.email == body.email,
         User.auth_provider == "email",
     ).first()
 
-    if not user or not user.password_hash or not pwd_ctx.verify(body.password, user.password_hash):
+    if not user or not user.password_hash or not bcrypt.checkpw(body.password.encode('utf-8'), user.password_hash.encode('utf-8')):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
@@ -376,3 +392,102 @@ async def email_login(
             "auth_provider": "email",
         },
     }
+
+
+# ── Password Reset ─────────────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password", summary="Request Password Reset Email")
+@limiter.limit("3/minute")
+async def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Send a password-reset email if the email belongs to an email/password account.
+    Always returns 200 to avoid leaking account existence.
+    """
+    import secrets
+    import hashlib
+    from app.services.email_service import send_password_reset_email
+
+    user = db.query(User).filter(
+        User.email == body.email,
+        User.auth_provider == "email",
+    ).first()
+
+    # Always return success to avoid email enumeration
+    if not user:
+        log.info(f"[ForgotPassword] No email account found for {body.email} — returning 200 silently")
+        return {"message": "If that email exists, a reset link has been sent."}
+
+    # Generate a cryptographically secure token
+    raw_token = secrets.token_urlsafe(48)           # 64-char URL-safe string
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
+
+    # Persist the hash + expiry (we never store the raw token)
+    user.reset_token_hash = token_hash
+    user.reset_token_expires_at = expires_at
+    db.commit()
+
+    reset_url = f"{settings.FRONTEND_URL}/reset-password?token={raw_token}"
+    send_password_reset_email(
+        to_email=user.email,
+        username=user.display_name or user.username,
+        reset_url=reset_url,
+    )
+
+    log.info(f"[ForgotPassword] Reset link issued for {user.email}")
+    return {"message": "If that email exists, a reset link has been sent."}
+
+
+@router.post("/reset-password", summary="Reset Password with Token")
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    body: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Validate the reset token and update the user's password.
+    The token is single-use and expires in 30 minutes.
+    """
+    import hashlib
+    import bcrypt
+
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+
+    token_hash = hashlib.sha256(body.token.encode()).hexdigest()
+
+    user = db.query(User).filter(
+        User.reset_token_hash == token_hash,
+        User.auth_provider == "email",
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset token.")
+
+    # Check expiry
+    if user.reset_token_expires_at is None or \
+       datetime.now(timezone.utc) > user.reset_token_expires_at.replace(tzinfo=timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset token has expired. Please request a new one.")
+
+    # Update password and invalidate token
+    user.password_hash = bcrypt.hashpw(body.new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    user.reset_token_hash = None
+    user.reset_token_expires_at = None
+    db.commit()
+
+    log.info(f"[ResetPassword] Password updated for {user.email}")
+    return {"message": "Password updated successfully. You can now log in with your new password."}

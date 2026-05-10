@@ -2,18 +2,33 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Shield, Search, RefreshCw, CheckCircle, XCircle, Clock,
   AlertTriangle, Play, GitBranch, X, Zap, ChevronRight,
-  TrendingDown, Activity, Lock, Download,
+  TrendingDown, Activity, Lock, Download, Upload, Code2,
+  FileArchive, Github, ChevronDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Badge } from "@/components/ui/badge";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   getRepositories, scanRepository, getScanStatus, getDashboardStats,
-  getReportDownloadUrl, downloadSecureFile
+  getReportDownloadUrl, downloadSecureFile, API_BASE
 } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
+
+type ScanModalTab = "github" | "zip" | "snippet";
+type Language = "python" | "javascript" | "typescript" | "java" | "go" | "rust" | "php" | "ruby";
+
+const LANGUAGES: { value: Language; label: string }[] = [
+  { value: "python", label: "Python" },
+  { value: "javascript", label: "JavaScript" },
+  { value: "typescript", label: "TypeScript" },
+  { value: "java", label: "Java" },
+  { value: "go", label: "Go" },
+  { value: "rust", label: "Rust" },
+  { value: "php", label: "PHP" },
+  { value: "ruby", label: "Ruby" },
+];
 
 // ── Status config ──────────────────────────────────────────────────────────────
 
@@ -412,9 +427,96 @@ const SecurityScansPage = () => {
   const [showScanModal, setShowScanModal] = useState(false);
   const [selectedRepo, setSelectedRepo] = useState<number | null>(null);
   const [hasActiveScans, setHasActiveScans] = useState(false);
-  // Map of repoId -> activeScanId started from the modal
   const [modalScanIds, setModalScanIds] = useState<Record<number, number>>({});
   const queryClient = useQueryClient();
+
+  // ── Modal multi-mode state ─────────────────────────────────────────────────
+  const [modalTab, setModalTab] = useState<ScanModalTab>("github");
+  const [zipFile, setZipFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [snippetCode, setSnippetCode] = useState("");
+  const [snippetLang, setSnippetLang] = useState<Language>("python");
+  const [quickScanLoading, setQuickScanLoading] = useState(false);
+  const [quickScanResult, setQuickScanResult] = useState<null | { score: number; vulnerabilities: { severity: string; title: string; description: string; line?: number }[] }>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith(".zip")) {
+      setZipFile(file);
+    } else {
+      toast.error("Please drop a .zip file");
+    }
+  }, []);
+
+  const simulateSnippetScan = (src: string) => {
+    const patterns = [
+      { re: /eval\s*\(/, title: "Code Injection via eval()", severity: "critical", desc: "Use of eval() can execute arbitrary code." },
+      { re: /innerHTML\s*=/, title: "XSS via innerHTML", severity: "high", desc: "Setting innerHTML with user data enables XSS attacks." },
+      { re: /(password|secret|api_key|token)\s*=\s*['"][^'"]{8,}/i, title: "Hardcoded Secret", severity: "critical", desc: "Secrets must be stored in environment variables." },
+      { re: /MD5|SHA1|md5\(|sha1\(/i, title: "Weak Hash Algorithm", severity: "high", desc: "MD5/SHA1 are broken. Use SHA-256 or bcrypt." },
+      { re: /SELECT\s.*WHERE.*\$\{|SELECT.*\+\s*[a-z]/i, title: "SQL Injection Risk", severity: "critical", desc: "Use parameterized queries." },
+      { re: /exec\s*\(|system\s*\(|shell_exec|subprocess\.call.*shell=True/i, title: "Command Injection", severity: "critical", desc: "Unvalidated shell input allows command injection." },
+      { re: /\.unwrap\(\)/, title: "Unhandled Error (unwrap)", severity: "medium", desc: "unwrap() panics on None/Err. Use proper error handling." },
+      { re: /pickle\.loads|yaml\.load\s*\([^,]+\)/, title: "Unsafe Deserialization", severity: "high", desc: "Unsafe deserialization can lead to RCE." },
+    ];
+    const vulns: { severity: string; title: string; description: string; line?: number }[] = [];
+    src.split("\n").forEach((line, i) => {
+      patterns.forEach(p => {
+        if (p.re.test(line)) vulns.push({ severity: p.severity, title: p.title, description: p.desc, line: i + 1 });
+      });
+    });
+    const critical = vulns.filter(v => v.severity === "critical").length;
+    const high = vulns.filter(v => v.severity === "high").length;
+    const score = Math.max(0, 100 - (critical * 20) - (high * 10) - (vulns.length * 3));
+    return { score, vulnerabilities: vulns };
+  };
+
+  const handleQuickScan = async () => {
+    setQuickScanLoading(true);
+    setQuickScanResult(null);
+    try {
+      const token = localStorage.getItem("ark_jwt");
+      if (modalTab === "snippet") {
+        if (!snippetCode.trim()) { toast.error("Please paste some code first."); return; }
+        try {
+          const res = await fetch(`${API_BASE}/scan/snippet`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+            body: JSON.stringify({ code: snippetCode, language: snippetLang }),
+          });
+          if (res.ok) { setQuickScanResult(await res.json()); return; }
+        } catch { /* fall through to local */ }
+        setQuickScanResult(simulateSnippetScan(snippetCode));
+        toast.info("Using local scan engine — connect backend for full AI analysis");
+      } else if (modalTab === "zip") {
+        if (!zipFile) { toast.error("Please select a ZIP file first."); return; }
+        const formData = new FormData();
+        formData.append("file", zipFile);
+        try {
+          const res = await fetch(`${API_BASE}/scan/upload`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: formData,
+          });
+          if (res.ok) { setQuickScanResult(await res.json()); return; }
+        } catch { /* fall through */ }
+        toast.error("ZIP scan requires backend /scan/upload endpoint. Try snippet mode.");
+      }
+    } finally {
+      setQuickScanLoading(false);
+    }
+  };
+
+  const closeModal = () => {
+    setShowScanModal(false);
+    setModalTab("github");
+    setZipFile(null);
+    setSnippetCode("");
+    setQuickScanResult(null);
+  };
 
   const { data: stats, isLoading } = useQuery({
     queryKey: ["dashboard-stats"],
@@ -565,57 +667,175 @@ const SecurityScansPage = () => {
         </motion.div>
       </div>
 
-      {/* Run Scan Modal */}
+      {/* Run Scan Modal — 3 tabs */}
       <AnimatePresence>
         {showScanModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="glass rounded-2xl p-6 w-full max-w-md mx-4 border border-border/80 shadow-2xl"
+              className="glass rounded-2xl w-full max-w-lg border border-border/80 shadow-2xl overflow-hidden"
             >
-              <div className="flex items-center justify-between mb-4">
+              {/* Modal Header */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-3">
                 <div className="flex items-center gap-2">
                   <div className="w-8 h-8 bg-primary/15 rounded-xl flex items-center justify-center">
                     <Zap className="w-4 h-4 text-primary" />
                   </div>
                   <h3 className="font-semibold text-base">Run Security Scan</h3>
                 </div>
-                <button onClick={() => setShowScanModal(false)} className="p-1 hover:bg-muted rounded-lg">
+                <button onClick={closeModal} className="p-1.5 hover:bg-muted rounded-lg transition-colors">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <p className="text-sm text-muted-foreground mb-4">
-                Select a repository to run a full security scan. The scanner will clone the repo, analyse it with Semgrep, Bandit, and Trivy, then generate an AI-powered report.
-              </p>
+              {/* Tab Switcher */}
+              <div className="flex gap-1 mx-5 mb-4 p-1 bg-black/30 rounded-xl">
+                {([
+                  { id: "github" as ScanModalTab, icon: Github, label: "GitHub Repo" },
+                  { id: "zip" as ScanModalTab, icon: FileArchive, label: "Upload ZIP" },
+                  { id: "snippet" as ScanModalTab, icon: Code2, label: "Paste Code" },
+                ] as const).map(tab => (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setModalTab(tab.id); setQuickScanResult(null); }}
+                    className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      modalTab === tab.id ? "bg-primary text-white shadow-lg shadow-primary/20" : "text-muted-foreground hover:text-white"
+                    }`}
+                  >
+                    <tab.icon className="w-3.5 h-3.5" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-              <div className="mb-2 text-xs text-muted-foreground font-mono">Estimated time: 1–3 minutes</div>
+              <div className="px-5 pb-5">
+                <AnimatePresence mode="wait">
 
-              <ModalSelect
-                options={repos.map((r) => ({ label: r.full_name, value: r.id }))}
-                value={selectedRepo}
-                onChange={setSelectedRepo}
-              />
-
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" size="sm" onClick={() => setShowScanModal(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  size="sm"
-                  className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
-                  onClick={() => selectedRepo && scanMutation.mutate(selectedRepo)}
-                  disabled={!selectedRepo || scanMutation.isPending}
-                >
-                  {scanMutation.isPending ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Zap className="w-3.5 h-3.5" />
+                  {/* ── GitHub Repo Tab ─────────────────────────────────────── */}
+                  {modalTab === "github" && (
+                    <motion.div key="github" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }}>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Select a connected repository for a full 7-layer deep scan with AI-powered analysis.
+                      </p>
+                      <div className="text-xs text-muted-foreground font-mono mb-3">⏱ Estimated time: 1–3 minutes</div>
+                      <ModalSelect
+                        options={repos.map((r) => ({ label: r.full_name, value: r.id }))}
+                        value={selectedRepo}
+                        onChange={setSelectedRepo}
+                      />
+                      <div className="flex gap-2 justify-end mt-2">
+                        <Button variant="outline" size="sm" onClick={closeModal}>Cancel</Button>
+                        <Button
+                          size="sm"
+                          className="bg-primary text-primary-foreground hover:bg-primary/90 gap-1.5"
+                          onClick={() => selectedRepo && scanMutation.mutate(selectedRepo)}
+                          disabled={!selectedRepo || scanMutation.isPending}
+                        >
+                          {scanMutation.isPending ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                          {scanMutation.isPending ? "Starting…" : "Start Deep Scan"}
+                        </Button>
+                      </div>
+                    </motion.div>
                   )}
-                  {scanMutation.isPending ? "Starting…" : "Start Scan"}
-                </Button>
+
+                  {/* ── ZIP Upload Tab ─────────────────────────────────────── */}
+                  {modalTab === "zip" && (
+                    <motion.div key="zip" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }}>
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Upload a <code className="text-primary">.zip</code> archive of your project — no GitHub connection needed.
+                      </p>
+                      <input ref={zipInputRef} type="file" accept=".zip" className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) setZipFile(f); }} />
+                      <div
+                        onDrop={handleDrop}
+                        onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onClick={() => zipInputRef.current?.click()}
+                        className={`flex flex-col items-center justify-center h-36 border-2 border-dashed rounded-xl cursor-pointer transition-all mb-3 ${
+                          isDragging ? "border-primary bg-primary/10" : "border-border/50 hover:border-primary/50 hover:bg-white/5"
+                        }`}
+                      >
+                        {zipFile ? (
+                          <div className="text-center">
+                            <FileArchive className="w-8 h-8 text-primary mx-auto mb-2" />
+                            <p className="text-sm font-medium text-white">{zipFile.name}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{(zipFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                            <button onClick={e => { e.stopPropagation(); setZipFile(null); }}
+                              className="mt-1.5 text-xs text-red-400 hover:text-red-300">Remove</button>
+                          </div>
+                        ) : (
+                          <div className="text-center">
+                            <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                            <p className="text-sm text-muted-foreground">Drop .zip here or <span className="text-primary">browse</span></p>
+                            <p className="text-xs text-muted-foreground/60 mt-1">Up to 50 MB</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ZIP Scan Result */}
+                      {quickScanResult && <QuickScanResult result={quickScanResult} />}
+
+                      <div className="flex gap-2 justify-end mt-2">
+                        <Button variant="outline" size="sm" onClick={closeModal}>Close</Button>
+                        <Button size="sm"
+                          className="bg-gradient-to-r from-purple-600 to-cyan-600 text-white hover:opacity-90 gap-1.5"
+                          onClick={handleQuickScan}
+                          disabled={!zipFile || quickScanLoading}
+                        >
+                          {quickScanLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Shield className="w-3.5 h-3.5" />}
+                          {quickScanLoading ? "Scanning…" : "Scan ZIP"}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* ── Code Snippet Tab ───────────────────────────────────── */}
+                  {modalTab === "snippet" && (
+                    <motion.div key="snippet" initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-sm text-muted-foreground">Paste code for instant security analysis.</p>
+                        <div className="relative">
+                          <select
+                            value={snippetLang}
+                            onChange={e => setSnippetLang(e.target.value as Language)}
+                            className="appearance-none pl-2.5 pr-7 py-1 rounded-lg bg-muted/60 border border-border/60 text-xs text-white focus:outline-none focus:border-primary cursor-pointer"
+                          >
+                            {LANGUAGES.map(l => <option key={l.value} value={l.value} className="bg-gray-900">{l.label}</option>)}
+                          </select>
+                          <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                        </div>
+                      </div>
+                      <textarea
+                        value={snippetCode}
+                        onChange={e => setSnippetCode(e.target.value)}
+                        placeholder="Paste your code here..."
+                        spellCheck={false}
+                        className="w-full h-44 font-mono text-xs bg-black/40 border border-border/50 rounded-xl p-3 text-green-300 placeholder-gray-600 focus:outline-none focus:border-primary resize-none leading-relaxed mb-1"
+                      />
+                      <p className="text-[10px] text-muted-foreground mb-3">
+                        {snippetCode.split("\n").length} lines · {snippetCode.length} chars
+                      </p>
+
+                      {/* Snippet Scan Result */}
+                      {quickScanResult && <QuickScanResult result={quickScanResult} />}
+
+                      <div className="flex gap-2 justify-end">
+                        <Button variant="outline" size="sm" onClick={closeModal}>Close</Button>
+                        <Button size="sm"
+                          className="bg-gradient-to-r from-purple-600 to-cyan-600 text-white hover:opacity-90 gap-1.5"
+                          onClick={handleQuickScan}
+                          disabled={!snippetCode.trim() || quickScanLoading}
+                        >
+                          {quickScanLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
+                          {quickScanLoading ? "Scanning…" : "Run Quick Scan"}
+                        </Button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                </AnimatePresence>
               </div>
             </motion.div>
           </div>
@@ -624,5 +844,44 @@ const SecurityScansPage = () => {
     </>
   );
 };
+
+// ── Quick Scan Result ─────────────────────────────────────────────────────────
+
+function QuickScanResult({ result }: { result: { score: number; vulnerabilities: { severity: string; title: string; description: string; line?: number }[] } }) {
+  const sevColors: Record<string, string> = {
+    critical: "text-red-400 bg-red-500/10 border-red-500/20",
+    high: "text-orange-400 bg-orange-500/10 border-orange-500/20",
+    medium: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20",
+    low: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+  };
+  return (
+    <div className="mb-3 space-y-2">
+      <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-white/5 border border-white/10">
+        <span className="text-xs text-muted-foreground font-medium">Security Score</span>
+        <span className={`text-base font-bold ${
+          result.score >= 80 ? "text-green-400" : result.score >= 60 ? "text-yellow-400" : "text-red-400"
+        }`}>{result.score}/100</span>
+      </div>
+      {result.vulnerabilities.length === 0 ? (
+        <p className="text-xs text-green-400 text-center py-2">✅ No issues detected!</p>
+      ) : (
+        <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+          {result.vulnerabilities.map((v, i) => (
+            <div key={i} className={`border rounded-lg px-2.5 py-2 ${sevColors[v.severity] ?? sevColors.low}`}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-semibold">{v.title}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {v.line && <span className="text-[10px] opacity-60">L{v.line}</span>}
+                  <span className="text-[10px] uppercase font-bold">{v.severity}</span>
+                </div>
+              </div>
+              <p className="text-[10px] opacity-70 mt-0.5 leading-relaxed">{v.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default SecurityScansPage;

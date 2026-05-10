@@ -24,6 +24,8 @@ import PolicyPage from "./pages/PolicyPage.tsx";
 import LoginPage from "./pages/LoginPage.tsx";
 import RegisterPage from "./pages/RegisterPage.tsx";
 import ManualScanPage from "./pages/ManualScanPage.tsx";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
+import ResetPasswordPage from "./pages/ResetPasswordPage.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -42,8 +44,15 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            {/* ── Public routes ──────────────────────────────── */}
             <Route path="/" element={<Index />} />
             <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
+
+            {/* ── Protected dashboard routes (auth guard in DashboardLayout) ── */}
             <Route path="/dashboard" element={<DashboardLayout />}>
               <Route index element={<DashboardOverview />} />
               <Route path="repos" element={<RepositoriesPage />} />
@@ -52,19 +61,14 @@ const App = () => (
               <Route path="vulns" element={<VulnerabilitiesPage />} />
               <Route path="trends" element={<TrendsPage />} />
               <Route path="cicd" element={<CICDGeneratorPage />} />
-              {/* New enterprise routes */}
               <Route path="compliance" element={<CompliancePage />} />
               <Route path="threats" element={<ThreatAnalysisPage />} />
               <Route path="policy" element={<PolicyPage />} />
-            <Route path="login" element={<LoginPage />} />
-              <Route path="register" element={<RegisterPage />} />
-              <Route path="manual-scan" element={<ManualScanPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="profile" element={<ProfilePage />} />
+              <Route path="manual-scan" element={<ManualScanPage />} />
             </Route>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            <Route path="/manual-scan" element={<ManualScanPage />} />
+
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>

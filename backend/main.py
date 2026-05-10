@@ -35,12 +35,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} ({settings.APP_ENV})")
 
     # Startup security checks
-    if "CHANGE_ME" in settings.SECRET_KEY and settings.APP_ENV != "development":
-        log.error("FATAL: SECRET_KEY is insecure default value! Set a real key via .env")
+    if "CHANGE_ME" in settings.SECRET_KEY:
+        if settings.APP_ENV != "development":
+            raise RuntimeError(
+                "FATAL: SECRET_KEY is the insecure default value. "
+                "Set a real key via .env (openssl rand -hex 32)."
+            )
+        else:
+            log.warning("⚠ SECRET_KEY is using the insecure default — OK for dev, FATAL in production.")
     if not settings.ENCRYPTION_KEY:
         log.warning("SECURITY WARNING: ENCRYPTION_KEY is not set — GitHub tokens stored in plaintext!")
     if not settings.GITHUB_WEBHOOK_SECRET:
         log.warning("SECURITY WARNING: GITHUB_WEBHOOK_SECRET is not set — webhook verification disabled!")
+    if settings.DEBUG and settings.APP_ENV == "production":
+        log.error("FATAL: DEBUG=True is not allowed in production. Set DEBUG=False in .env.")
 
     # Initialise database tables + Auto-patch schemas
     try:
@@ -58,6 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ── Application Factory ───────────────────────────────────────────────────────
 
 def create_app() -> FastAPI:
+    is_prod = settings.APP_ENV == "production"
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -66,9 +75,10 @@ def create_app() -> FastAPI:
             "Scans GitHub repositories for vulnerabilities, "
             "analyses dependencies, and generates secure CI/CD pipelines."
         ),
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
+        # Disable interactive docs in production — don't expose API blueprint
+        docs_url=None if is_prod else "/docs",
+        redoc_url=None if is_prod else "/redoc",
+        openapi_url=None if is_prod else "/openapi.json",
         lifespan=lifespan,
     )
 
@@ -82,22 +92,29 @@ def create_app() -> FastAPI:
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         log.error(f"Unhandled exception on {request.method} {request.url}: {exc}", exc_info=True)
-        
-        # Attach CORS headers so browsers do not block 500 errors
-        origin = request.headers.get("origin")
+
+        # Attach CORS headers so browsers do not block 500 errors.
+        # NEVER emit Access-Control-Allow-Origin: * when credentials are involved —
+        # instead, mirror the exact allowed origin back (or omit the header entirely).
+        origin = request.headers.get("origin", "")
         headers = {}
-        if origin in settings.allowed_origins_list or "*" in settings.allowed_origins_list:
-            headers["Access-Control-Allow-Origin"] = origin if origin in settings.allowed_origins_list else "*"
+        if origin and origin in settings.allowed_origins_list:
+            headers["Access-Control-Allow-Origin"] = origin
             headers["Access-Control-Allow-Credentials"] = "true"
-        
+
+        import uuid
+        error_id = str(uuid.uuid4())[:8]
+        log.error(f"[{error_id}] {exc}")
+
+        # In production: never leak internal error details
+        content = {"detail": "An internal server error occurred.", "error_id": error_id}
+        if settings.APP_ENV != "production":
+            content["debug_error"] = str(exc)
+
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "detail": "An internal server error occurred.",
-                "error_message": str(exc),
-                "path": str(request.url),
-            },
-            headers=headers
+            content=content,
+            headers=headers,
         )
 
     # ── Middleware ────────────────────────────────────────────────────────────
@@ -119,13 +136,25 @@ def create_app() -> FastAPI:
         elapsed_ms = round((time.perf_counter() - start) * 1000, 1)
         # Performance
         response.headers["X-Process-Time-MS"] = str(elapsed_ms)
-        response.headers["X-ARK-Version"] = settings.APP_VERSION
         # Security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # Content-Security-Policy — prevents XSS and clickjacking
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self' https://api.github.com; "
+            "frame-ancestors 'none';"
+        )
+        # Only expose version in non-production environments
+        if settings.APP_ENV != "production":
+            response.headers["X-ARK-Version"] = settings.APP_VERSION
         if settings.APP_ENV == "production":
             response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
         return response

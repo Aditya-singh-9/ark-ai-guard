@@ -31,6 +31,7 @@ const NAV_GROUPS = [
     label: "Security",
     items: [
       { icon: GitBranch,     label: "Repositories",    path: "/dashboard/repos",    color: "text-neon-blue" },
+      { icon: Zap,           label: "Quick Scan",      path: "/dashboard/manual-scan", color: "text-neon-cyan" },
       { icon: Shield,        label: "Security Scans",  path: "/dashboard/scans",    color: "text-neon-purple" },
       { icon: AlertTriangle, label: "Vulnerabilities", path: "/dashboard/vulns",    color: "text-warning" },
       { icon: Target,        label: "Threat Analysis", path: "/dashboard/threats",  color: "text-critical" },

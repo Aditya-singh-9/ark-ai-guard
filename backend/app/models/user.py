@@ -39,6 +39,10 @@ class User(Base):
         DateTime, nullable=True
     )
 
+    # Password reset token (stored as SHA-256 hash — never store raw tokens)
+    reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     repositories: Mapped[list["Repository"]] = relationship(
         "Repository", back_populates="user", cascade="all, delete-orphan"

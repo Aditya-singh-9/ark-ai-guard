@@ -1,43 +1,90 @@
 import { motion } from "framer-motion";
-import { Shield, Package, Brain, GitBranch, ArrowRight } from "lucide-react";
-import { Link } from "react-router-dom";
+import {
+  Shield, Package, Brain, GitBranch, Search, Key, Network,
+  CloudCog, BrainCircuit, Zap, FileCode, Lock, ArrowRight,
+  ScanLine, Fingerprint, Layers,
+} from "lucide-react";
 
 const features = [
   {
-    icon: Shield,
-    title: "Repository Security Scanner",
+    icon: Layers,
+    title: "7-Layer Deep Scanning™",
     description:
-      "Automatically scan GitHub repositories for OWASP Top-10 vulnerabilities, misconfigurations, and security risks using static analysis.",
+      "Our proprietary scanning pipeline runs multiple parallel analysis passes — each designed to catch a different class of vulnerability that single-pass scanners miss entirely.",
     color: "neon-cyan",
     hsl: "185 100% 50%",
-    badge: "SAST",
+    badge: "NEXUS",
+    detail: "Multi-layer · Parallel execution · Real-time streaming",
+  },
+  {
+    icon: BrainCircuit,
+    title: "Mythos™ AI Engine",
+    description:
+      "Our proprietary AI security engine understands your codebase's intent and architecture. It cuts false positives to under 5% and generates context-aware fixes in seconds.",
+    color: "neon-purple",
+    hsl: "270 100% 65%",
+    badge: "MYTHOS AI",
+    detail: "FP Rate < 5% · Threat Modeling · Personalized Auto-Fix",
+  },
+  {
+    icon: ScanLine,
+    title: "Personalized Deep Scan",
+    description:
+      "Every scan is uniquely tailored to your repo's language, framework, and architecture. No generic templates — Mythos™ learns your codebase and focuses where risk is highest.",
+    color: "neon-blue",
+    hsl: "220 100% 60%",
+    badge: "ADAPTIVE",
+    detail: "GitHub · ZIP Upload · Code Paste — all scan modes",
   },
   {
     icon: Package,
-    title: "Dependency Risk Detection",
+    title: "Dependency DNA™",
     description:
-      "Detect outdated packages and CVE-tagged dependencies. Get pinned update recommendations with severity scores from NIST NVD.",
-    color: "neon-blue",
-    hsl: "220 100% 60%",
+      "Supply chain attack detection with typosquatting analysis, CVE scoring from NIST NVD, and automatic pinned-version recommendations. Stop attacks before they start.",
+    color: "neon-green",
+    hsl: "150 100% 50%",
     badge: "SCA",
+    detail: "CVE · SBOM · Typosquatting · License Risk",
   },
   {
-    icon: Brain,
-    title: "AI Architecture Analysis",
+    icon: Key,
+    title: "Secret & Credential Detection",
     description:
-      "AI models analyze your repository structure, API design, and data flows to surface architectural weaknesses and anti-patterns.",
-    color: "neon-purple",
-    hsl: "270 100% 65%",
-    badge: "AI",
+      "Identify exposed API keys, passwords, and cryptographic weaknesses across every file in your repository — including binary artifacts and configuration files.",
+    color: "warning",
+    hsl: "45 100% 55%",
+    badge: "CRYPTO",
+    detail: "API Keys · Weak Ciphers · Hardcoded Secrets · Cert Issues",
   },
   {
     icon: GitBranch,
-    title: "CI/CD Pipeline Generator",
+    title: "Auto-Fix PR Generation",
     description:
-      "Automatically generate hardened GitHub Actions workflows with security gates, secret scanning, and deployment guardrails.",
-    color: "neon-green",
-    hsl: "150 100% 50%",
-    badge: "DevOps",
+      "Don't just detect — fix. Mythos™ AI generates working pull requests with patched code, so your team spends time shipping features, not hunting security bugs.",
+    color: "neon-cyan",
+    hsl: "185 100% 50%",
+    badge: "AUTO-FIX",
+    detail: "GitHub PR · YAML Patches · Dependency Pins",
+  },
+  {
+    icon: CloudCog,
+    title: "Infrastructure Security",
+    description:
+      "Scan cloud configs, containers, and CI/CD pipeline definitions for misconfigurations. Understand the real risk exposure of each issue before it reaches production.",
+    color: "neon-blue",
+    hsl: "220 100% 60%",
+    badge: "IaC",
+    detail: "Terraform · K8s · Dockerfile · CI/CD Pipelines",
+  },
+  {
+    icon: Fingerprint,
+    title: "Compliance Mapping",
+    description:
+      "Automatically map every vulnerability to SOC 2, PCI DSS, HIPAA, and ISO 27001 controls. Get compliance-ready reports your auditors will love — generated in seconds.",
+    color: "neon-purple",
+    hsl: "270 100% 65%",
+    badge: "COMPLIANCE",
+    detail: "SOC2 · PCI DSS · HIPAA · ISO 27001 · OWASP Top 10",
   },
 ];
 
@@ -46,43 +93,49 @@ const FeaturesSection = () => {
     <section className="py-28 px-4 relative overflow-hidden">
       {/* Background */}
       <div className="absolute inset-0 grid-bg opacity-100 pointer-events-none" />
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[1px] bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
 
-      <div className="max-w-6xl mx-auto relative">
+      <div className="max-w-7xl mx-auto relative">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true }}
           className="text-center mb-16"
         >
-          <span className="text-xs font-mono text-primary uppercase tracking-widest mb-4 block">Platform Features</span>
-          <h2 className="text-4xl md:text-5xl font-bold mb-5">
-            Powerful <span className="gradient-text">Security Features</span>
+          <span className="inline-flex items-center gap-2 text-xs font-mono text-violet-400 uppercase tracking-widest mb-4 px-3 py-1.5 bg-violet-500/10 border border-violet-500/20 rounded-full">
+            <BrainCircuit className="w-3.5 h-3.5" /> Powered by Mythos™ AI
+          </span>
+          <h2 className="text-4xl md:text-5xl font-black mb-5 tracking-tight">
+            Not Just a Scanner.<br />
+            <span className="gradient-text">A Security Intelligence Platform.</span>
           </h2>
           <p className="text-muted-foreground text-lg max-w-2xl mx-auto leading-relaxed">
-            Everything you need to secure your codebase and automate your DevSecOps workflow — in one platform.
+            DevScops Guard combines <strong className="text-white">7 analysis layers</strong>, the{" "}
+            <strong className="text-violet-400">Mythos™ AI engine</strong>, and deep compliance mapping
+            to give your team complete codebase visibility.
           </p>
         </motion.div>
 
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
           {features.map((feature, i) => (
             <motion.div
               key={feature.title}
               initial={{ opacity: 0, y: 24 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
-              transition={{ delay: i * 0.1, duration: 0.5 }}
+              transition={{ delay: i * 0.07, duration: 0.5 }}
               whileHover={{ y: -6 }}
               className="group cursor-default"
             >
               <div
-                className="rounded-2xl p-6 h-full flex flex-col border border-border/50 transition-all duration-300"
+                className="rounded-2xl p-5 h-full flex flex-col border border-border/50 transition-all duration-300"
                 style={{
                   background: `linear-gradient(135deg, hsl(var(--card) / 0.9), hsl(var(--card) / 0.6))`,
                   backdropFilter: "blur(20px)",
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLElement).style.borderColor = `hsl(${feature.hsl} / 0.4)`;
-                  (e.currentTarget as HTMLElement).style.boxShadow = `0 0 40px -10px hsl(${feature.hsl} / 0.2)`;
+                  (e.currentTarget as HTMLElement).style.borderColor = `hsl(${feature.hsl} / 0.5)`;
+                  (e.currentTarget as HTMLElement).style.boxShadow = `0 0 40px -10px hsl(${feature.hsl} / 0.25)`;
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLElement).style.borderColor = "";
@@ -90,37 +143,33 @@ const FeaturesSection = () => {
                 }}
               >
                 {/* Icon + Badge row */}
-                <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center justify-between mb-4">
                   <div
-                    className="w-12 h-12 rounded-xl flex items-center justify-center"
+                    className="w-11 h-11 rounded-xl flex items-center justify-center"
                     style={{ background: `hsl(${feature.hsl} / 0.12)` }}
                   >
-                    <feature.icon
-                      className="w-6 h-6"
-                      style={{ color: `hsl(${feature.hsl})` }}
-                    />
+                    <feature.icon className="w-5 h-5" style={{ color: `hsl(${feature.hsl})` }} />
                   </div>
                   <span
-                    className="text-[10px] font-bold font-mono px-2 py-1 rounded-md tracking-wider"
-                    style={{
-                      color: `hsl(${feature.hsl})`,
-                      background: `hsl(${feature.hsl} / 0.1)`,
-                    }}
+                    className="text-[9px] font-black font-mono px-2 py-1 rounded-md tracking-wider"
+                    style={{ color: `hsl(${feature.hsl})`, background: `hsl(${feature.hsl} / 0.1)` }}
                   >
                     {feature.badge}
                   </span>
                 </div>
 
-                <h3 className="text-base font-semibold mb-3 leading-snug">{feature.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed flex-1">
-                  {feature.description}
-                </p>
+                <h3 className="text-sm font-bold mb-2 leading-snug">{feature.title}</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed flex-1">{feature.description}</p>
+
+                <div className="mt-3 pt-3 border-t border-white/5">
+                  <p className="text-[10px] font-mono text-muted-foreground/60">{feature.detail}</p>
+                </div>
 
                 <div
-                  className="mt-4 flex items-center gap-1.5 text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="mt-3 flex items-center gap-1.5 text-xs font-semibold opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ color: `hsl(${feature.hsl})` }}
                 >
-                  Learn more <ArrowRight className="w-3 h-3" />
+                  Explore feature <ArrowRight className="w-3 h-3" />
                 </div>
               </div>
             </motion.div>
