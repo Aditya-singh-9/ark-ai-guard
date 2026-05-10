@@ -1,14 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Shield, Mail, Lock, Eye, EyeOff, Github, User, ArrowRight, Loader2, Check } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
-import { githubOAuthUrl } from "@/lib/api";
+import { githubOAuthUrl, registerEmail } from "@/lib/api";
 import { toast } from "sonner";
 
-const configUrl = import.meta.env.VITE_API_URL;
-const API_BASE = configUrl 
-  ? (configUrl.endsWith("/api/v1") ? configUrl : `${configUrl.replace(/\/$/, "")}/api/v1`)
-  : "http://localhost:8000/api/v1";
 
 const PasswordStrength = ({ password }: { password: string }) => {
   const checks = [
@@ -39,7 +34,6 @@ const PasswordStrength = ({ password }: { password: string }) => {
 
 export default function RegisterPage() {
   const navigate = useNavigate();
-  const { login } = useAuth();
   const [form, setForm] = useState({ email: "", username: "", password: "", displayName: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -51,21 +45,16 @@ export default function RegisterPage() {
     if (form.password.length < 8) { toast.error("Password must be at least 8 characters"); return; }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: form.email,
-          username: form.username,
-          password: form.password,
-          display_name: form.displayName || form.username,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Registration failed");
-      login(data.access_token, data.user);
-      toast.success(`Welcome to DevScops Guard, ${data.user.display_name ?? data.user.username}! 🎉`);
-      navigate("/dashboard");
+      const data = await registerEmail(
+        form.email,
+        form.username,
+        form.password,
+        form.displayName || form.username,
+      );
+      if (data.requires_verification) {
+        toast.success("Account created! Check your email for a 6-digit code.");
+        navigate(`/verify-email?email=${encodeURIComponent(form.email)}`);
+      }
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Registration failed");
     } finally {

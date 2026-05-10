@@ -108,10 +108,11 @@ const RepoRow = ({
   return (
     <motion.tr
       key={repo.id}
-      initial={{ opacity: 0, y: 4 }}
+      initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.04 }}
+      transition={{ delay: index * 0.05, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
       className="border-b border-border/30 hover:bg-muted/20 transition-colors group"
+      style={{ willChange: "opacity, transform" }}
     >
       {/* Repository name */}
       <td className="p-4">
@@ -352,8 +353,15 @@ const RepositoryTable = () => {
   const { data: repos = [], isLoading } = useQuery({
     queryKey: ["repositories"],
     queryFn: getRepositories,
-    refetchInterval: 10000, // always poll — catches scan status changes
-    staleTime: 0,
+    // Poll faster when a scan is likely running, slower when idle
+    refetchInterval: (query) => {
+      const list = query.state.data ?? [];
+      const hasRunning = list.some(
+        (r: Repository) => r.scan_status === "running" || r.scan_status === "pending" || r.scan_status === "cloning"
+      );
+      return hasRunning ? 3000 : 15000;
+    },
+    staleTime: 2000,
   });
 
   const addMutation = useMutation({
@@ -393,8 +401,9 @@ const RepositoryTable = () => {
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
+        transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
         className="glass rounded-xl overflow-hidden"
+        style={{ willChange: "opacity, transform" }}
       >
         {/* Header */}
         <div className="p-5 flex flex-wrap items-center justify-between gap-3 border-b border-border/50">

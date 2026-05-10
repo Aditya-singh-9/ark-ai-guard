@@ -60,9 +60,11 @@ const MetricCard = ({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay }}
-      whileHover={{ y: -3 }}
-      className={`group glass rounded-xl p-5 transition-all duration-300 cursor-default border border-border/50 ${c.border} ${c.glow}`}
+      transition={{ duration: 0.4, delay, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -4, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } }}
+      whileTap={{ scale: 0.98 }}
+      style={{ willChange: "opacity, transform" }}
+      className={`group glass rounded-xl p-5 transition-all duration-250 cursor-default border border-border/50 ${c.border} ${c.glow}`}
     >
       <div className="flex items-start justify-between mb-4">
         <div className={`w-10 h-10 rounded-lg ${c.bg} flex items-center justify-center transition-transform group-hover:scale-110`}>

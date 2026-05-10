@@ -26,6 +26,7 @@ import RegisterPage from "./pages/RegisterPage.tsx";
 import ManualScanPage from "./pages/ManualScanPage.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 import ResetPasswordPage from "./pages/ResetPasswordPage.tsx";
+import VerifyEmailPage from "./pages/VerifyEmailPage.tsx";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +52,7 @@ const App = () => (
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
 
             {/* ── Protected dashboard routes (auth guard in DashboardLayout) ── */}
             <Route path="/dashboard" element={<DashboardLayout />}>

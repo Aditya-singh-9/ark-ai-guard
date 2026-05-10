@@ -51,47 +51,73 @@
     --sidebar-accent-foreground: 210 40% 95%;
     --sidebar-border: 220 15% 15%;
     --sidebar-ring: 185 100% 50%;
+
+    /* Animation easing presets */
+    --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
 @layer base {
   * {
     @apply border-border;
+    /* Smooth transitions on all interactive elements */
+    transition-timing-function: var(--ease-smooth);
+  }
+  html {
+    /* Native smooth scrolling */
+    scroll-behavior: smooth;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
     background-image:
       radial-gradient(ellipse 80% 50% at 50% -20%, hsl(185 100% 50% / 0.05), transparent),
       radial-gradient(ellipse 60% 40% at 80% 80%, hsl(270 100% 65% / 0.04), transparent);
+    /* Prevent layout shifts from font loading */
+    font-display: swap;
   }
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: hsl(var(--background));
-  }
+
+  /* ── Premium scrollbar ────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
-    border-radius: 3px;
+    border-radius: 100px;
+    transition: background 0.2s var(--ease-smooth);
   }
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--primary) / 0.5);
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary) / 0.4); }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  /* ── Focus ring style ─────────────────────────────────────── */
+  :focus-visible {
+    outline: 2px solid hsl(var(--primary) / 0.8);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Ensure GPU acceleration for all animated elements */
+  [data-framer-motion] {
+    will-change: transform, opacity;
   }
 }
 
 @layer utilities {
+  /* ── Glass morphism ───────────────────────────────────────── */
   .glass {
     @apply bg-card/60 backdrop-blur-xl border border-border/50;
   }
   .glass-hover {
-    @apply glass transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_40px_-8px_hsl(var(--primary)/0.2)] hover:-translate-y-0.5;
+    @apply glass transition-all hover:border-primary/40 hover:shadow-[0_0_40px_-8px_hsl(var(--primary)/0.2)] hover:-translate-y-0.5;
+    transition-duration: 250ms;
   }
   .glass-card {
     background: linear-gradient(135deg, hsl(var(--card) / 0.8), hsl(var(--card) / 0.4));
     backdrop-filter: blur(20px);
     border: 1px solid hsl(var(--border) / 0.6);
   }
+
+  /* ── Neon glow effects ────────────────────────────────────── */
   .neon-glow {
     box-shadow: 0 0 20px -5px hsl(var(--primary) / 0.4),
                 0 0 60px -15px hsl(var(--primary) / 0.2),
@@ -105,6 +131,8 @@
     text-shadow: 0 0 20px hsl(var(--primary) / 0.5),
                  0 0 40px hsl(var(--primary) / 0.2);
   }
+
+  /* ── Text gradients ───────────────────────────────────────── */
   .gradient-text {
     @apply bg-clip-text text-transparent bg-gradient-to-r from-[hsl(var(--neon-cyan))] via-[hsl(var(--neon-blue))] to-[hsl(var(--neon-purple))];
   }
@@ -114,6 +142,8 @@
   .gradient-border {
     border-image: linear-gradient(135deg, hsl(var(--neon-cyan)), hsl(var(--neon-purple))) 1;
   }
+
+  /* ── Backgrounds ──────────────────────────────────────────── */
   .scan-line {
     background: linear-gradient(180deg, transparent 0%, hsl(var(--primary) / 0.08) 50%, transparent 100%);
     animation: scan 3s ease-in-out infinite;
@@ -133,19 +163,38 @@
     background: linear-gradient(hsl(var(--card) / 0.8), hsl(var(--card) / 0.8)) padding-box,
                 linear-gradient(135deg, hsl(var(--neon-cyan) / 0.4), hsl(var(--neon-purple) / 0.4)) border-box;
   }
+
+  /* ── Severity badges ──────────────────────────────────────── */
   .severity-critical {
     @apply bg-critical/10 text-critical border-critical/30 shadow-[0_0_12px_-3px_hsl(var(--critical)/0.3)];
   }
   .severity-high {
     @apply bg-warning/10 text-warning border-warning/30 shadow-[0_0_12px_-3px_hsl(var(--warning)/0.3)];
   }
-  .severity-medium {
-    @apply bg-neon-blue/10 text-neon-blue border-neon-blue/30;
+  .severity-medium { @apply bg-neon-blue/10 text-neon-blue border-neon-blue/30; }
+  .severity-low    { @apply bg-neon-green/10 text-neon-green border-neon-green/30; }
+
+  /* ── Smooth interactive element defaults ──────────────────── */
+  .interactive {
+    transition: all 200ms var(--ease-smooth);
+    cursor: pointer;
   }
-  .severity-low {
-    @apply bg-neon-green/10 text-neon-green border-neon-green/30;
+  .interactive:hover { transform: translateY(-1px); }
+  .interactive:active { transform: translateY(0px); }
+
+  /* ── Shimmer loading effect ───────────────────────────────── */
+  .shimmer-bg {
+    background: linear-gradient(90deg,
+      hsl(var(--muted) / 0.3) 0%,
+      hsl(var(--muted) / 0.6) 50%,
+      hsl(var(--muted) / 0.3) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
   }
 }
+
+/* ── Keyframe animations ──────────────────────────────────────── */
 
 @keyframes scan {
   0% { transform: translateY(-100%); opacity: 0; }
@@ -160,8 +209,8 @@
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-8px); }
+  0%, 100% { transform: translateY(0px) translateZ(0); }
+  50% { transform: translateY(-8px) translateZ(0); }
 }
 
 @keyframes blink {
@@ -175,8 +224,8 @@
 }
 
 @keyframes spin-slow {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from { transform: rotate(0deg) translateZ(0); }
+  to { transform: rotate(360deg) translateZ(0); }
 }
 
 @keyframes shimmer {
@@ -189,24 +238,44 @@
   to { width: 100%; }
 }
 
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(16px) translateZ(0); }
+  to { opacity: 1; transform: translateY(0) translateZ(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Utility animation classes ────────────────────────────────── */
+
 .animate-pulse-glow { animation: pulse-glow 2.5s ease-in-out infinite; }
 .animate-float { animation: float 4s ease-in-out infinite; }
 .animate-blink { animation: blink 1s step-end infinite; }
 .animate-spin-slow { animation: spin-slow 8s linear infinite; }
+.animate-slide-up { animation: slide-up 0.4s var(--ease-smooth) forwards; }
+.animate-fade-in { animation: fade-in 0.3s var(--ease-smooth) forwards; }
 .animate-shimmer {
   background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.1) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
 
-/* Syntax highlighting for code blocks */
+/* ── Stagger animation helpers ────────────────────────────────── */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.10s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.20s; }
+
+/* ── Syntax highlighting ──────────────────────────────────────── */
 .code-keyword { color: hsl(var(--neon-purple)); }
 .code-string { color: hsl(var(--neon-green)); }
 .code-comment { color: hsl(var(--muted-foreground)); font-style: italic; }
 .code-value { color: hsl(var(--neon-cyan)); }
 .code-key { color: hsl(var(--neon-blue)); }
 
-/* Terminal cursor */
+/* ── Terminal cursor ──────────────────────────────────────────── */
 .terminal-cursor::after {
   content: '▋';
   animation: blink 1s step-end infinite;

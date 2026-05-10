@@ -43,6 +43,15 @@ class User(Base):
     reset_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
     reset_token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
+    # ── Email Verification ─────────────────────────────────────────────────────
+    # GitHub OAuth users are auto-verified. Email/password users must verify.
+    is_email_verified: Mapped[bool] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0"
+    )
+    # OTP stored as SHA-256 hash — never store the raw 6-digit code
+    email_otp_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    email_otp_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     repositories: Mapped[list["Repository"]] = relationship(
         "Repository", back_populates="user", cascade="all, delete-orphan"

@@ -312,6 +312,14 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
+
+      // Unverified email — redirect to OTP page
+      if (res.status === 403 && data.detail === "requires_verification") {
+        toast.info("Please verify your email first.");
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`);
+        return;
+      }
+
       if (!res.ok) {
         throw new Error(
           typeof data.detail === "string"

@@ -408,3 +408,35 @@ export async function healthCheck(): Promise<{ status: string; version?: string 
   if (!res.ok) throw new Error("Backend unreachable");
   return res.json();
 }
+
+/** Register with email/password — returns verification prompt, no JWT */
+export async function registerEmail(
+  email: string,
+  username: string,
+  password: string,
+  display_name?: string,
+): Promise<{ requires_verification: boolean; email: string; message: string }> {
+  return request("/auth/register", {
+    method: "POST",
+    body: JSON.stringify({ email, username, password, display_name }),
+  });
+}
+
+/** Verify OTP after registration — returns JWT on success */
+export async function verifyEmail(
+  email: string,
+  otp: string,
+): Promise<{ access_token: string; user: User }> {
+  return request("/auth/verify-email", {
+    method: "POST",
+    body: JSON.stringify({ email, otp }),
+  });
+}
+
+/** Resend OTP to email */
+export async function resendOtp(email: string): Promise<{ message: string }> {
+  return request("/auth/resend-otp", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}

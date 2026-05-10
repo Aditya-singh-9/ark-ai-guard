@@ -151,8 +151,9 @@ const ScanRow = ({
     <motion.div
       initial={{ opacity: 0, x: -8 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ delay: index * 0.05 }}
+      transition={{ delay: index * 0.05, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
       className="px-5 py-4 hover:bg-muted/20 transition-colors"
+      style={{ willChange: "opacity, transform" }}
     >
       <div className="flex items-center gap-4">
         {/* Status icon */}

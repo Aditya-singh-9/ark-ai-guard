@@ -18,8 +18,9 @@ const OnboardingCard = () => (
   <motion.div
     initial={{ opacity: 0, y: 16 }}
     animate={{ opacity: 1, y: 0 }}
-    transition={{ duration: 0.5 }}
+    transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
     className="glass rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 via-transparent to-neon-cyan/5 p-8 text-center relative overflow-hidden"
+    style={{ willChange: "opacity, transform" }}
   >
     {/* Decorative glow */}
     <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent pointer-events-none" />

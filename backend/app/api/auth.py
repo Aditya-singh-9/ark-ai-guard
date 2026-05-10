@@ -3,7 +3,9 @@ Authentication router — GitHub OAuth + JWT issuance + Email/Password auth.
 
 Endpoints:
   POST /auth/github           Exchange GitHub OAuth code for a JWT
-  POST /auth/register         Register with email + password
+  POST /auth/register         Register with email + password (OTP sent, no JWT yet)
+  POST /auth/verify-email     Verify OTP and receive JWT
+  POST /auth/resend-otp       Resend verification OTP
   POST /auth/login            Login with email + password
   GET  /auth/me               Return current user profile
   POST /auth/logout           Revoke JWT (server-side denylist)
@@ -14,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import re
 import uuid
+import secrets
+import hashlib
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
@@ -238,6 +242,7 @@ async def github_login(request: Request, body: GitHubCodeRequest, db: Session = 
             avatar_url=gh_user.get("avatar_url"),
             access_token_encrypted=_encrypt_token(gh_token),
             last_login_at=datetime.now(timezone.utc),
+            is_email_verified=1,  # GitHub already verifies emails
         )
         db.add(user)
         db.commit()
@@ -297,15 +302,39 @@ async def logout(
 
 # ── Email / Password Auth ─────────────────────────────────────────────────────
 
-@router.post("/register", response_model=TokenResponse, summary="Register with Email/Password")
+class VerificationResponse(BaseModel):
+    requires_verification: bool
+    email: str
+    message: str
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str
+    otp: str
+
+
+class ResendOtpRequest(BaseModel):
+    email: str
+
+
+def _generate_otp() -> tuple[str, str, datetime]:
+    """Generate a 6-digit OTP, its SHA-256 hash, and expiry (10 min)."""
+    raw_otp = "{:06d}".format(secrets.randbelow(1_000_000))
+    otp_hash = hashlib.sha256(raw_otp.encode()).hexdigest()
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+    return raw_otp, otp_hash, expires_at
+
+
+@router.post("/register", summary="Register with Email/Password")
 @limiter.limit("5/minute")
 async def register(
     request: Request,
     body: RegisterRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Register a new account with email and password."""
+    """Register a new account. Returns a verification prompt — no JWT until OTP confirmed."""
     import bcrypt
+    from app.services.email_service import send_verification_otp_email
 
     # Password strength enforcement (email already validated by EmailStr)
     _validate_password_strength(body.password)
@@ -318,6 +347,8 @@ async def register(
     if db.query(User).filter(User.username == body.username).first():
         raise HTTPException(status_code=409, detail="Username is already taken.")
 
+    raw_otp, otp_hash, expires_at = _generate_otp()
+
     user = User(
         github_id=None,
         username=body.username,
@@ -327,12 +358,79 @@ async def register(
         auth_provider="email",
         password_hash=bcrypt.hashpw(body.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8'),
         last_login_at=datetime.now(timezone.utc),
+        is_email_verified=0,
+        email_otp_hash=otp_hash,
+        email_otp_expires_at=expires_at,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
 
-    log.info(f"New email user registered: {user.username}")
+    send_verification_otp_email(
+        to_email=user.email,
+        username=user.display_name or user.username,
+        otp=raw_otp,
+    )
+    log.info(f"New email user registered (unverified): {user.username} — OTP sent")
+
+    return {
+        "requires_verification": True,
+        "email": user.email,
+        "message": "Account created! Check your email for the 6-digit verification code.",
+    }
+
+
+@router.post("/verify-email", response_model=TokenResponse, summary="Verify Email with OTP")
+@limiter.limit("10/minute")
+async def verify_email(
+    request: Request,
+    body: VerifyEmailRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Verify 6-digit OTP sent after registration. Issues a JWT on success."""
+    otp_hash = hashlib.sha256(body.otp.strip().encode()).hexdigest()
+
+    user = db.query(User).filter(
+        User.email == body.email,
+        User.auth_provider == "email",
+    ).first()
+
+    if not user:
+        raise HTTPException(status_code=400, detail="Account not found.")
+
+    if bool(user.is_email_verified):
+        # Already verified — just issue token
+        jwt_token = create_access_token({"sub": str(user.id), "username": user.username})
+        return {
+            "access_token": jwt_token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user": {
+                "id": user.id,
+                "github_id": None,
+                "username": user.username,
+                "email": user.email,
+                "display_name": user.display_name,
+                "avatar_url": None,
+                "auth_provider": "email",
+            },
+        }
+
+    if user.email_otp_hash != otp_hash:
+        raise HTTPException(status_code=400, detail="Incorrect verification code. Please try again.")
+
+    if user.email_otp_expires_at is None or \
+       datetime.now(timezone.utc) > user.email_otp_expires_at.replace(tzinfo=timezone.utc):
+        raise HTTPException(status_code=400, detail="Verification code has expired. Please request a new one.")
+
+    # Mark verified and clear OTP
+    user.is_email_verified = 1
+    user.email_otp_hash = None
+    user.email_otp_expires_at = None
+    user.last_login_at = datetime.now(timezone.utc)
+    db.commit()
+
+    log.info(f"Email verified for user: {user.username}")
     jwt_token = create_access_token({"sub": str(user.id), "username": user.username})
 
     return {
@@ -351,6 +449,39 @@ async def register(
     }
 
 
+@router.post("/resend-otp", summary="Resend Email Verification OTP")
+@limiter.limit("3/minute")
+async def resend_otp(
+    request: Request,
+    body: ResendOtpRequest,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Regenerate and resend the 6-digit verification OTP."""
+    from app.services.email_service import send_verification_otp_email
+
+    user = db.query(User).filter(
+        User.email == body.email,
+        User.auth_provider == "email",
+    ).first()
+
+    # Always return success to prevent email enumeration
+    if not user or bool(user.is_email_verified):
+        return {"message": "If a pending verification exists for that email, a new code has been sent."}
+
+    raw_otp, otp_hash, expires_at = _generate_otp()
+    user.email_otp_hash = otp_hash
+    user.email_otp_expires_at = expires_at
+    db.commit()
+
+    send_verification_otp_email(
+        to_email=user.email,
+        username=user.display_name or user.username,
+        otp=raw_otp,
+    )
+    log.info(f"OTP resent for: {user.email}")
+    return {"message": "If a pending verification exists for that email, a new code has been sent."}
+
+
 @router.post("/login", response_model=TokenResponse, summary="Login with Email/Password")
 @limiter.limit("10/minute")
 async def email_login(
@@ -358,7 +489,7 @@ async def email_login(
     body: EmailLoginRequest,
     db: Session = Depends(get_db),
 ) -> dict:
-    """Authenticate with email and password."""
+    """Authenticate with email and password. Blocks unverified accounts."""
     import bcrypt
 
     user = db.query(User).filter(
@@ -370,6 +501,14 @@ async def email_login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password.",
+        )
+
+    # Block login until email is verified
+    if not bool(user.is_email_verified):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="requires_verification",
+            headers={"X-Verification-Email": user.email},
         )
 
     user.last_login_at = datetime.now(timezone.utc)
