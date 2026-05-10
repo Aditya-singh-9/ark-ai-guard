@@ -58,7 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Don't crash immediately — DB might not be ready yet in Docker Compose
         log.warning("Continuing startup without DB — some endpoints will fail")
 
-    log.info("Application startup complete ✓")
+    log.info("Application startup complete")
     yield
     log.info("Application shutdown complete")
 

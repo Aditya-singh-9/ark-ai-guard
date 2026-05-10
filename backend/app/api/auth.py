@@ -234,19 +234,41 @@ async def github_login(request: Request, body: GitHubCodeRequest, db: Session = 
         db.refresh(existing)
         user = existing
     else:
-        user = User(
-            github_id=gh_user["id"],
-            username=gh_user.get("login", ""),
-            email=email,
-            display_name=gh_user.get("name"),
-            avatar_url=gh_user.get("avatar_url"),
-            access_token_encrypted=_encrypt_token(gh_token),
-            last_login_at=datetime.now(timezone.utc),
-            is_email_verified=1,  # GitHub already verifies emails
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
+        user = None
+        # Check if email is already registered via Email/Password
+        if email:
+            existing_email = db.query(User).filter(User.email == email).first()
+            if existing_email:
+                existing_email.github_id = gh_user["id"]
+                existing_email.avatar_url = gh_user.get("avatar_url")
+                existing_email.access_token_encrypted = _encrypt_token(gh_token)
+                existing_email.is_email_verified = 1
+                db.commit()
+                db.refresh(existing_email)
+                user = existing_email
+
+        if not user:
+            base_username = gh_user.get("login", "")
+            username = base_username
+            suffix = 1
+            # Ensure unique username
+            while db.query(User).filter(User.username == username).first():
+                username = f"{base_username}_{suffix}"
+                suffix += 1
+
+            user = User(
+                github_id=gh_user["id"],
+                username=username,
+                email=email,
+                display_name=gh_user.get("name"),
+                avatar_url=gh_user.get("avatar_url"),
+                access_token_encrypted=_encrypt_token(gh_token),
+                last_login_at=datetime.now(timezone.utc),
+                is_email_verified=1,  # GitHub already verifies emails
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
 
     log.info(f"User authenticated: {user.username} (id={user.id})")
 

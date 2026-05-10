@@ -133,7 +133,7 @@ def init_db() -> None:
     except Exception as e:
         log.error(f"Failed to auto-patch schema: {e}")
 
-    log.info("Database ready ✓")
+    log.info("Database ready")
 
 
 def check_db_connection() -> bool:

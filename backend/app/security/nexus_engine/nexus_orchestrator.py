@@ -182,7 +182,7 @@ async def run_nexus_engine(
     result.total_duration_seconds = time.perf_counter() - overall_start
 
     log.info(
-        f"[Nexus] ✓ Complete in {result.total_duration_seconds:.1f}s — "
+        f"[Nexus] Complete in {result.total_duration_seconds:.1f}s — "
         f"Nexus Score: {result.nexus_score:.1f} — "
         f"{len(all_findings)} findings"
     )

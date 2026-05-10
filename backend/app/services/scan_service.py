@@ -231,7 +231,7 @@ async def run_full_scan(
 
         db.commit()
         log.info(
-            f"[Scan {scan_id}] ✓ Complete in {elapsed:.1f}s — "
+            f"[Scan {scan_id}] Complete in {elapsed:.1f}s — "
             f"Nexus Score: {scan_report.nexus_score:.1f} — "
             f"{len(all_findings)} findings"
         )
