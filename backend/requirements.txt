@@ -4,6 +4,7 @@ uvicorn[standard]==0.32.1
 pydantic==2.10.4
 pydantic-settings==2.7.0
 python-multipart==0.0.20
+email-validator==2.2.0
 
 # ── Database ──────────────────────────────────────────────────────────────────
 sqlalchemy==2.0.36
@@ -12,6 +13,7 @@ alembic==1.14.0
 
 # ── Authentication / Security ─────────────────────────────────────────────────
 python-jose[cryptography]==3.3.0
+bcrypt==4.1.3
 passlib[bcrypt]==1.7.4
 cryptography==44.0.0
 
@@ -23,8 +25,8 @@ gitpython==3.1.43
 
 # ── AI Integration ────────────────────────────────────────────────────────────
 google-generativeai==0.8.3
-llama-cpp-python==0.3.20   # Updated: 0.2.56 → 0.3.20 (installed after C++ build tools)
 huggingface-hub==0.27.0
+# llama-cpp-python requires C++ build tools — disabled on Render (use local only)
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 slowapi==0.1.9

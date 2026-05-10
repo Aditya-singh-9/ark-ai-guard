@@ -100,6 +100,36 @@ def init_db() -> None:
                 conn.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(255)"))
                 conn.commit()
                 log.info("Patched missing password_hash column.")
+
+            # ── OTP email verification columns (added in v1.3) ────────────────
+            if 'is_email_verified' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_email_verified INTEGER NOT NULL DEFAULT 0"))
+                # Mark all existing users as verified so they're not locked out
+                conn.execute(text("UPDATE users SET is_email_verified=1"))
+                conn.commit()
+                log.info("Patched missing is_email_verified column (all existing users marked verified).")
+
+            if 'email_otp_hash' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_otp_hash VARCHAR(64)"))
+                conn.commit()
+                log.info("Patched missing email_otp_hash column.")
+
+            if 'email_otp_expires_at' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN email_otp_expires_at DATETIME"))
+                conn.commit()
+                log.info("Patched missing email_otp_expires_at column.")
+
+            # ── Password reset columns (added in v1.1) ────────────────────────
+            if 'reset_token_hash' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN reset_token_hash VARCHAR(64)"))
+                conn.commit()
+                log.info("Patched missing reset_token_hash column.")
+
+            if 'reset_token_expires_at' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN reset_token_expires_at DATETIME"))
+                conn.commit()
+                log.info("Patched missing reset_token_expires_at column.")
+
     except Exception as e:
         log.error(f"Failed to auto-patch schema: {e}")
 
