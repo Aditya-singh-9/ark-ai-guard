@@ -274,9 +274,12 @@ async def run_full_scan(
                     {
                         "finding_id": fix.finding_id,
                         "file": fix.file_path,
+                        "file_path": fix.file_path,
                         "line": fix.line_number,
                         "original": fix.original_code[:200],
+                        "original_code": fix.original_code,
                         "fixed": fix.fixed_code[:500],
+                        "fixed_code": fix.fixed_code,
                         "explanation": fix.explanation,
                         "confidence": fix.confidence,
                         "model": fix.model,

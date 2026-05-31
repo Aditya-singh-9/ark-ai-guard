@@ -30,6 +30,11 @@ from .layer4_deps      import run_layer4_deps
 from .layer5_dataflow  import run_layer5_dataflow
 from .layer6_iac       import run_layer6_iac
 from .layer7_ai_fusion import run_layer7_ai_fusion, generate_executive_summary
+from .external_scanners import (
+    run_semgrep_layer,
+    run_bandit_layer,
+    run_trivy_layer,
+)
 from app.utils.logger  import get_logger
 
 log = get_logger(__name__)
@@ -99,7 +104,7 @@ async def run_nexus_engine(
     file_map: RepoFileMap = await asyncio.to_thread(collect_repo_files, repo_path)
     log.info(f"[Nexus] File collector: {file_map.total_files} files in {time.perf_counter() - t_collect:.1f}s")
 
-    # ── Layers 1–6: run in parallel threads ───────────────────────────────────
+    # ── Layers 1–6: native + external scanners run in parallel threads ────────
     layer_runners = [
         (1, "Surface Pattern Scan",       run_layer1_surface),
         (2, "Semantic AST Analysis",      run_layer2_semantic),
@@ -107,6 +112,10 @@ async def run_nexus_engine(
         (4, "Dependency DNA Analysis",    run_layer4_deps),
         (5, "Cross-File Data Flow",       run_layer5_dataflow),
         (6, "IaC Blast-Radius Analysis",  run_layer6_iac),
+        # External industry scanners — degrade gracefully if binary missing.
+        (8, "Semgrep Static Analysis",    run_semgrep_layer),
+        (9, "Bandit Python Audit",        run_bandit_layer),
+        (10, "Trivy Dependency & Secret Scan", run_trivy_layer),
     ]
 
     async def _run_layer(layer_id: int, label: str, runner) -> tuple[int, list[NexusFinding], float]:
@@ -130,7 +139,7 @@ async def run_nexus_engine(
         log.info(f"[Nexus] Layer {layer_id} done in {elapsed:.1f}s — {len(findings)} findings")
         return layer_id, findings, elapsed
 
-    # Run all 6 base layers concurrently
+    # Run all base + external layers concurrently
     tasks = [asyncio.create_task(_run_layer(lid, lbl, runner))
              for lid, lbl, runner in layer_runners]
     layer_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -147,11 +156,12 @@ async def run_nexus_engine(
         result.layer_finding_counts[layer_id] = len(findings)
         result.layers_completed.append(layer_id)
 
-    log.info(f"[Nexus] Layers 1–6 complete. Total raw findings: {len(all_findings)}")
+    log.info(f"[Nexus] All layers complete. Total raw findings: {len(all_findings)}")
 
     # ── Deduplicate ────────────────────────────────────────────────────────────
     _notify("Deduplicating findings…", 0)
     all_findings = _deduplicate(all_findings)
+    all_findings = _cross_scanner_dedup(all_findings)
     log.info(f"[Nexus] After dedup: {len(all_findings)} findings")
 
     # ── Layer 7: Multi-Model AI Fusion (Mythos + Gemini) ────────────────────────
@@ -239,6 +249,56 @@ def _deduplicate(findings: list[NexusFinding]) -> list[NexusFinding]:
                 seen[key] = f
 
     return list(seen.values())
+
+
+def _cross_scanner_dedup(findings: list[NexusFinding]) -> list[NexusFinding]:
+    """
+    Collapse the SAME vulnerability reported by different scanners.
+
+    Native layers and external scanners (Semgrep/Bandit/Trivy) often flag the
+    same issue with different rule_ids, so the primary _deduplicate (keyed on
+    rule prefix) won't catch them. Here we key on (file, line, cwe_id) when a
+    CWE is known, or (file, line, normalized-issue) otherwise.
+
+    When multiple independent scanners agree, that's strong signal — so we keep
+    the highest-confidence finding and BOOST its confidence (capped at 0.99),
+    while recording corroborating scanners in the scanner field.
+    """
+    def _norm_issue(issue: str) -> str:
+        return "".join(c for c in issue.lower() if c.isalnum())[:40]
+
+    groups: dict[tuple, list[NexusFinding]] = {}
+    passthrough: list[NexusFinding] = []
+
+    for f in findings:
+        if f.cwe_id:
+            key = (f.file, f.line, f.cwe_id)
+        elif f.cve_id:
+            key = (f.file, f.cve_id, "cve")
+        elif f.line:
+            key = (f.file, f.line, _norm_issue(f.issue))
+        else:
+            # No reliable correlation key — keep as-is.
+            passthrough.append(f)
+            continue
+        groups.setdefault(key, []).append(f)
+
+    merged: list[NexusFinding] = []
+    for group in groups.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        # Pick the strongest finding as the representative.
+        best = max(group, key=lambda f: f.confidence * f.exploitability)
+        scanners = sorted({f.scanner.split("+")[0] for f in group})
+        if len(scanners) > 1:
+            # Multiple independent tools agree → raise confidence.
+            agreement_boost = 1.0 + 0.05 * (len(scanners) - 1)
+            best.confidence = min(0.99, best.confidence * agreement_boost)
+            best.scanner = "+".join(scanners)
+        merged.append(best)
+
+    return merged + passthrough
 
 
 def _sort_by_risk(findings: list[NexusFinding]) -> list[NexusFinding]:

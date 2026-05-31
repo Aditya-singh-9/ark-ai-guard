@@ -79,7 +79,13 @@ async def run_layer7_ai_fusion(
 
 
 async def _batch_augment_gemini(findings: list[NexusFinding]) -> list[NexusFinding]:
-    """Process findings in batches for Gemini augmentation."""
+    """Process findings in batches for Gemini augmentation.
+
+    Batches are dispatched concurrently (instead of one-after-another) so the
+    total wall-clock time is roughly one round-trip rather than the sum of all
+    batches. Order is preserved to keep results aligned with the input.
+    """
+    import asyncio
     try:
         import google.generativeai as genai
         genai.configure(api_key=GEMINI_API_KEY)
@@ -88,17 +94,22 @@ async def _batch_augment_gemini(findings: list[NexusFinding]) -> list[NexusFindi
         log.warning("[Layer 7] google-generativeai not installed — skipping Gemini")
         return findings
 
-    results: list[NexusFinding] = []
     batches = [findings[i:i+MAX_BATCH] for i in range(0, len(findings), MAX_BATCH)]
 
-    for batch_idx, batch in enumerate(batches):
+    async def _safe_call(batch_idx: int, batch: list[NexusFinding]) -> list[NexusFinding]:
         try:
-            augmented_batch = await _call_gemini(model, batch)
-            results.extend(augmented_batch)
+            return await _call_gemini(model, batch)
         except Exception as exc:
             log.debug(f"[Layer 7] Gemini batch {batch_idx} failed: {exc}")
-            results.extend(batch)
+            return batch
 
+    batch_results = await asyncio.gather(
+        *(_safe_call(idx, batch) for idx, batch in enumerate(batches))
+    )
+
+    results: list[NexusFinding] = []
+    for augmented_batch in batch_results:
+        results.extend(augmented_batch)
     return results
 
 

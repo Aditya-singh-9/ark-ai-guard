@@ -50,7 +50,7 @@ COPY --from=python-builder /usr/local/lib/python3.11/site-packages /usr/local/li
 COPY --from=python-builder /usr/local/bin /usr/local/bin
 
 # Install Semgrep and Bandit (lighter tools, installed in final stage)
-RUN pip install --no-cache-dir semgrep==1.100.0 bandit==1.8.3 pip-audit==2.8.0
+RUN pip install --no-cache-dir semgrep==1.100.0 bandit==1.8.0 pip-audit==2.8.0
 
 # Create scan temp dir
 RUN mkdir -p /tmp/ark-scans && chown ark:ark /tmp/ark-scans

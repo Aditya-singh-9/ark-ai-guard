@@ -526,6 +526,7 @@ async def create_scan_autofix_pr(
     Creates an Auto-Fix Pull Request on GitHub for vulnerabilities found in this scan.
     """
     from app.services.github_service import create_autofix_pr, GitHubAPIError
+    from app.api.auth import get_decrypted_token
     import json
 
     scan = db.query(ScanReport).filter(ScanReport.id == scan_id).first()
@@ -556,10 +557,23 @@ async def create_scan_autofix_pr(
         raise HTTPException(status_code=400, detail="Autofix suggestions list is empty")
 
     base_branch = scan.branch or "main"
-    
+
+    # Use the authenticated user's own GitHub token so the PR is created as them
+    # (and works on their private repos). Falls back to the shared PAT inside
+    # create_autofix_pr if this user has no connected GitHub token.
+    user_token = get_decrypted_token(user)
+
     try:
-        pr_data = await create_autofix_pr(repo.full_name, base_branch, fixes)
-        return {"status": "success", "message": "Pull request created", "pr_url": pr_data.get("html_url")}
+        pr_data = await create_autofix_pr(
+            repo.full_name, base_branch, fixes, access_token=user_token or None
+        )
+        return {
+            "status": "success",
+            "message": "Pull request created",
+            "pr_url": pr_data.get("html_url"),
+            "applied_count": pr_data.get("applied_count", 0),
+            "skipped": pr_data.get("skipped", []),
+        }
     except GitHubAPIError as e:
         raise HTTPException(status_code=502, detail=f"GitHub API Error: {str(e)}")
     except Exception as e:

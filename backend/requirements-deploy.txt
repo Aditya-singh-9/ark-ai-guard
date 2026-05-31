@@ -26,6 +26,13 @@ google-generativeai==0.8.3
 # NOTE: llama-cpp-python is excluded from production — requires C++ build tools
 # which are not available on Render/Vercel. Mythos uses offline rule engine instead.
 
+# ── Security Scanners ─────────────────────────────────────────────────────────
+# Semgrep + Bandit are pip-installable and wired into the Nexus orchestrator
+# (layers 8 & 9). Trivy is a Go binary — install separately in the Docker image
+# (see Dockerfile); the runner degrades gracefully if it's absent.
+semgrep==1.100.0
+bandit==1.8.0
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 slowapi==0.1.9
 

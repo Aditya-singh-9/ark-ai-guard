@@ -60,6 +60,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     log.info("Application startup complete")
     yield
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    try:
+        from app.services.github_service import close_client
+        await close_client()
+    except Exception as exc:
+        log.debug(f"Error closing GitHub HTTP client: {exc}")
     log.info("Application shutdown complete")
 
 
