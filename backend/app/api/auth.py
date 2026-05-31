@@ -214,6 +214,16 @@ async def github_login(request: Request, body: GitHubCodeRequest, db: Session = 
             detail="Could not retrieve user profile from GitHub API.",
         )
 
+    # Validate the GitHub response actually contains a user id — a 200 response
+    # with a malformed/rate-limited body would otherwise crash with a KeyError.
+    gh_user_id = gh_user.get("id")
+    if gh_user_id is None:
+        log.error(f"GitHub /user returned no id. Keys: {list(gh_user.keys())}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="GitHub returned an unexpected profile response. Please try again.",
+        )
+
     # 3. Resolve email (profile email may be private)
     email = gh_user.get("email")
     if not email:
@@ -222,53 +232,65 @@ async def github_login(request: Request, body: GitHubCodeRequest, db: Session = 
         email = primary["email"] if primary else None
 
     # 4. Upsert user in DB
-    existing = db.query(User).filter(User.github_id == gh_user["id"]).first()
-    if existing:
-        existing.username = gh_user.get("login", existing.username)
-        existing.email = email or existing.email
-        existing.avatar_url = gh_user.get("avatar_url")
-        existing.display_name = gh_user.get("name")
-        existing.access_token_encrypted = _encrypt_token(gh_token)
-        existing.last_login_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(existing)
-        user = existing
-    else:
-        user = None
-        # Check if email is already registered via Email/Password
-        if email:
-            existing_email = db.query(User).filter(User.email == email).first()
-            if existing_email:
-                existing_email.github_id = gh_user["id"]
-                existing_email.avatar_url = gh_user.get("avatar_url")
-                existing_email.access_token_encrypted = _encrypt_token(gh_token)
-                existing_email.is_email_verified = 1
-                db.commit()
-                db.refresh(existing_email)
-                user = existing_email
-
-        if not user:
-            base_username = gh_user.get("login", "")
-            username = base_username
-            suffix = 1
-            # Ensure unique username
-            while db.query(User).filter(User.username == username).first():
-                username = f"{base_username}_{suffix}"
-                suffix += 1
-
-            user = User(
-                github_id=gh_user["id"],
-                username=username,
-                email=email,
-                display_name=gh_user.get("name"),
-                avatar_url=gh_user.get("avatar_url"),
-                access_token_encrypted=_encrypt_token(gh_token),
-                last_login_at=datetime.now(timezone.utc),
-                is_email_verified=1,  # GitHub already verifies emails
-            )
-            db.add(user)
+    try:
+        existing = db.query(User).filter(User.github_id == gh_user_id).first()
+        if existing:
+            existing.username = gh_user.get("login", existing.username)
+            existing.email = email or existing.email
+            existing.avatar_url = gh_user.get("avatar_url")
+            existing.display_name = gh_user.get("name")
+            existing.access_token_encrypted = _encrypt_token(gh_token)
+            existing.last_login_at = datetime.now(timezone.utc)
             db.commit()
-            db.refresh(user)
+            db.refresh(existing)
+            user = existing
+        else:
+            user = None
+            # Check if email is already registered via Email/Password
+            if email:
+                existing_email = db.query(User).filter(User.email == email).first()
+                if existing_email:
+                    existing_email.github_id = gh_user_id
+                    existing_email.avatar_url = gh_user.get("avatar_url")
+                    existing_email.access_token_encrypted = _encrypt_token(gh_token)
+                    existing_email.is_email_verified = 1
+                    db.commit()
+                    db.refresh(existing_email)
+                    user = existing_email
+
+            if not user:
+                base_username = gh_user.get("login", "")
+                username = base_username
+                suffix = 1
+                # Ensure unique username
+                while db.query(User).filter(User.username == username).first():
+                    username = f"{base_username}_{suffix}"
+                    suffix += 1
+
+                user = User(
+                    github_id=gh_user_id,
+                    username=username,
+                    email=email,
+                    display_name=gh_user.get("name"),
+                    avatar_url=gh_user.get("avatar_url"),
+                    access_token_encrypted=_encrypt_token(gh_token),
+                    last_login_at=datetime.now(timezone.utc),
+                    is_email_verified=1,  # GitHub already verifies emails
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Turn an opaque 500 into a logged, explained error. The most common
+        # cause on free hosting is a cold/dropped DB connection.
+        db.rollback()
+        log.error(f"GitHub login DB upsert failed: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not complete login due to a temporary database issue. Please try again.",
+        ) from exc
 
     log.info(f"User authenticated: {user.username} (id={user.id})")
 

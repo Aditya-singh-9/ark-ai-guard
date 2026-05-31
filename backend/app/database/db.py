@@ -33,7 +33,10 @@ if _is_sqlite:
 else:
     engine = create_engine(
         settings.DATABASE_URL,
-        pool_pre_ping=True,
+        pool_pre_ping=True,      # Validate connections before use (handles drops)
+        pool_recycle=300,        # Recycle connections older than 5 min — Neon/managed
+                                 # Postgres closes idle connections, which otherwise
+                                 # surface as a 500 on the first request after idle.
         pool_size=10,
         max_overflow=20,
         pool_timeout=30,
