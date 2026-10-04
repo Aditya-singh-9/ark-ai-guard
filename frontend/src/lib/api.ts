@@ -186,12 +186,52 @@ export interface CICDResponse {
 
 // ── API Functions ─────────────────────────────────────────────────────────────
 
+/**
+ * Ping the backend /health until it responds. Free-tier hosts (Render) sleep
+ * after inactivity and take 30–60s to cold-start; during that window requests
+ * fail with ERR_CONNECTION_CLOSED. Safe to call repeatedly.
+ */
+export async function wakeBackend(maxWaitMs = 75_000): Promise<boolean> {
+  const healthUrl = `${API_BASE.replace(/\/api\/v1$/, "")}/health`;
+  const deadline = Date.now() + maxWaitMs;
+  while (Date.now() < deadline) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 10_000);
+      const res = await fetch(healthUrl, { signal: ctrl.signal, cache: "no-store" });
+      clearTimeout(t);
+      if (res.ok) return true;
+    } catch {
+      /* still waking up */
+    }
+    await new Promise((r) => setTimeout(r, 2_500));
+  }
+  return false;
+}
+
 /** Exchange GitHub OAuth code for JWT. */
 export async function authGithub(code: string): Promise<{ access_token: string; user: User }> {
-  return request("/auth/github", {
-    method: "POST",
-    body: JSON.stringify({ code }),
-  });
+  // The OAuth code is single-use and expires in ~10 min, so make sure the
+  // server is awake BEFORE sending it — otherwise a cold start burns the code.
+  const awake = await wakeBackend();
+  if (!awake) throw new Error("Server is starting up. Please try logging in again in a minute.");
+
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 45_000);
+  try {
+    return await request("/auth/github", {
+      method: "POST",
+      body: JSON.stringify({ code, redirect_uri: getRedirectUri() }),
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    if ((err as Error).name === "AbortError" || err instanceof TypeError) {
+      throw new Error("Could not reach the server. Please try again.");
+    }
+    throw err;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 /** Get current authenticated user. */
@@ -215,6 +255,29 @@ export async function connectRepository(url: string): Promise<Repository> {
 /** Remove a repository. */
 export async function deleteRepository(id: number): Promise<void> {
   return request(`/repositories/${id}`, { method: "DELETE" });
+}
+
+// ── PR Review Bot ─────────────────────────────────────────────────────────────
+
+export interface PrReviewStatus {
+  enabled: boolean;
+  hook_id?: number | null;
+  reason?: string;
+}
+
+/** Is automatic PR review (repo webhook) enabled for this repository? */
+export async function getPrReviewStatus(repoId: number): Promise<PrReviewStatus> {
+  return request(`/webhooks/pr-review/${repoId}`);
+}
+
+/** Install the webhook so every PR gets inline security review comments. */
+export async function enablePrReview(repoId: number): Promise<PrReviewStatus> {
+  return request(`/webhooks/pr-review/${repoId}`, { method: "POST" });
+}
+
+/** Remove the PR review webhook. */
+export async function disablePrReview(repoId: number): Promise<PrReviewStatus> {
+  return request(`/webhooks/pr-review/${repoId}`, { method: "DELETE" });
 }
 
 /** Initiate a scan for a repository. Returns scan_id to poll. */

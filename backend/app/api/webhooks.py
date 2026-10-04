@@ -3,9 +3,10 @@ ARK GitHub Webhooks — Auto-scan on push/PR + PR Comment Bot.
 
 Features:
   1. POST /webhooks/github — Receive push/PR events and auto-trigger scans
-  2. PR Comment Bot — Post security results as PR comments
-  3. GitHub Check Runs — Set pass/fail status on PRs
+  2. PR Review Bot — inline review comments on PR-added lines + one summary comment
+  3. Commit statuses — pending/success/failure on the PR head (usable as a required check)
   4. Webhook signature verification (HMAC-SHA256)
+  5. /webhooks/pr-review/{repo_id} — one-click enable/disable/status of PR reviews
 """
 from __future__ import annotations
 import hashlib
@@ -23,7 +24,8 @@ from app.database.db import get_db
 from app.models.repository import Repository
 from app.models.scan_report import ScanReport, ScanStatus
 from app.models.user import User
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, get_decrypted_token
+from app.services import pr_review_service
 
 log = get_logger(__name__)
 
@@ -178,17 +180,23 @@ async def _handle_push(
 async def _handle_pull_request(
     payload: dict, background_tasks: BackgroundTasks, db: Session
 ) -> dict:
-    """Handle PR event — trigger diff-aware scan + post results as PR comment."""
+    """Handle PR event — scan the PR head and post an inline review on the PR."""
     action = payload.get("action", "")
-    if action not in ("opened", "synchronize", "reopened"):
+    if action not in ("opened", "synchronize", "reopened", "ready_for_review"):
         return {"status": "skipped", "reason": f"PR action '{action}' not scanned"}
 
     pr = payload.get("pull_request", {})
+    if pr.get("draft"):
+        return {"status": "skipped", "reason": "Draft PR"}
+
     repo_data = payload.get("repository", {})
     full_name = repo_data.get("full_name", "")
     pr_number = payload.get("number", 0)
-    pr_branch = pr.get("head", {}).get("ref", "")
-    pr_sha = pr.get("head", {}).get("sha", "")
+    head = pr.get("head", {}) or {}
+    pr_branch = head.get("ref", "")
+    pr_sha = head.get("sha", "")
+    # Fork PRs: the head branch lives in the fork, so clone from there.
+    head_clone_url = (head.get("repo") or {}).get("clone_url")
 
     # Find repository in our DB
     repo = db.query(Repository).filter(Repository.full_name == full_name).first()
@@ -208,10 +216,11 @@ async def _handle_pull_request(
     db.commit()
     db.refresh(scan_report)
 
-    # Trigger scan + PR comment in background
+    # Trigger scan + PR review in background
     background_tasks.add_task(
         _run_webhook_scan, repo.id, scan_report.id, full_name,
-        pr_number=pr_number, pr_sha=pr_sha
+        pr_number=pr_number, pr_sha=pr_sha,
+        branch=pr_branch, clone_url=head_clone_url,
     )
 
     log.info(f"[Webhook] PR scan triggered for {full_name} PR#{pr_number}")
@@ -223,84 +232,167 @@ async def _handle_pull_request(
     }
 
 
+def _token_for_repo(repo: Repository) -> str:
+    """Repo owner's GitHub OAuth token, falling back to the shared PAT."""
+    token = ""
+    if repo.user is not None:
+        token = get_decrypted_token(repo.user)
+    return token or settings.GITHUB_PAT
+
+
+def _report_url(scan_id: int) -> str:
+    return f"{settings.FRONTEND_URL.rstrip('/')}/dashboard/scans/{scan_id}/deep"
+
+
 async def _run_webhook_scan(
     repo_id: int,
     scan_id: int,
     full_name: str,
     pr_number: int | None = None,
     pr_sha: str | None = None,
+    branch: str | None = None,
+    clone_url: str | None = None,
 ) -> None:
-    """Background task: run scan and optionally post PR comment."""
+    """Background task: run scan and, for PRs, post an inline review."""
     from app.database.db import SessionLocal
     from app.services.scan_service import run_full_scan
+    from app.models.vulnerability import Vulnerability
 
     db = SessionLocal()
+    token = ""
     try:
         scan_report = db.query(ScanReport).filter(ScanReport.id == scan_id).first()
         repo = db.query(Repository).filter(Repository.id == repo_id).first()
         if not scan_report or not repo:
             return
 
-        # Run full scan
-        result = await run_full_scan(db, repo, scan_report)
+        token = _token_for_repo(repo)
+        report_url = _report_url(scan_id)
 
-        # Post PR comment if this was a PR-triggered scan
-        if pr_number and result.status == ScanStatus.COMPLETED:
-            await _post_pr_comment(full_name, pr_number, result, pr_sha)
+        if pr_number and pr_sha:
+            await pr_review_service.set_commit_status(
+                token, full_name, pr_sha, "pending", "Security scan in progress…", report_url
+            )
+
+        result = await run_full_scan(
+            db, repo, scan_report,
+            access_token=token or None,
+            branch=branch,
+            clone_url=clone_url,
+        )
+
+        if not (pr_number and pr_sha):
+            return
+
+        if result.status != ScanStatus.COMPLETED:
+            await pr_review_service.set_commit_status(
+                token, full_name, pr_sha, "error",
+                f"Scan failed: {(result.error_message or 'unknown error')[:100]}", report_url,
+            )
+            return
+
+        if not token:
+            log.warning(f"[PR Bot] No GitHub token for {full_name} — cannot post review")
+            return
+
+        vulns = db.query(Vulnerability).filter(Vulnerability.scan_id == scan_id).all()
+        await pr_review_service.post_pr_review(
+            token, full_name, pr_number, pr_sha, result, vulns, report_url
+        )
 
     except Exception as exc:
         log.error(f"[Webhook] Background scan failed: {exc}", exc_info=True)
+        if pr_number and pr_sha and token:
+            await pr_review_service.set_commit_status(
+                token, full_name, pr_sha, "error", "DevScops Guard hit an internal error"
+            )
     finally:
         db.close()
 
 
-async def _post_pr_comment(
-    full_name: str,
-    pr_number: int,
-    scan_report: ScanReport,
-    pr_sha: str | None = None,
-) -> None:
-    """Post scan results as a formatted PR comment on GitHub."""
-    import httpx
+# ── PR Review setup (one-click webhook install) ────────────────────────────────
 
-    # Build the comment body
-    score = scan_report.nexus_score or scan_report.security_score or 0
-    score_emoji = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+def _hook_url(request: Request) -> str:
+    base = settings.BACKEND_PUBLIC_URL.strip().rstrip("/")
+    if not base:
+        base = str(request.base_url).rstrip("/")
+        # Behind Render/other proxies the request may look like plain http.
+        if base.startswith("http://") and "localhost" not in base and "127.0.0.1" not in base:
+            base = "https://" + base[len("http://"):]
+    return f"{base}/api/v1/webhooks/github"
 
-    comment = f"""## 🛡️ ARK AI Guard Security Report
 
-{score_emoji} **Nexus Score: {score:.0f}/100**
+def _owned_repo(db: Session, repo_id: int, user: User) -> Repository:
+    repo = db.query(Repository).filter(
+        Repository.id == repo_id, Repository.user_id == user.id
+    ).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repo
 
-| Severity | Count |
-|----------|-------|
-| 🔴 Critical | {scan_report.critical_count or 0} |
-| 🟠 High | {scan_report.high_count or 0} |
-| 🟡 Medium | {scan_report.medium_count or 0} |
-| 🟢 Low | {scan_report.low_count or 0} |
-| **Total** | **{scan_report.total_vulnerabilities or 0}** |
 
-"""
+def _user_token_or_400(user: User) -> str:
+    token = get_decrypted_token(user)
+    if not token:
+        raise HTTPException(
+            status_code=400,
+            detail="Connect your GitHub account to enable PR reviews.",
+        )
+    return token
 
-    if scan_report.critical_count and scan_report.critical_count > 0:
-        comment += "> ⚠️ **Action Required**: This PR introduces critical security vulnerabilities.\n\n"
-    elif score >= 80:
-        comment += "> ✅ **Approved by ARK**: No critical security issues detected.\n\n"
 
-    comment += f"🔍 *Scanned in {scan_report.duration_seconds or 0:.1f}s by ARK Nexus Engine™*"
+@router.get("/pr-review/{repo_id}")
+async def pr_review_status(
+    repo_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Is the PR-review webhook installed on this repository?"""
+    repo = _owned_repo(db, repo_id, current_user)
+    token = get_decrypted_token(current_user)
+    if not token:
+        return {"enabled": False, "reason": "github_not_connected"}
+    hook = await pr_review_service.find_repo_webhook(token, repo.full_name, _hook_url(request))
+    return {"enabled": bool(hook and hook.get("active")), "hook_id": hook.get("id") if hook else None}
 
-    # Post comment via GitHub API
-    # This requires the repository owner to have a GitHub token configured
-    # For now, we log the comment — in production, use the GitHub App installation token
-    log.info(f"[PR Bot] Would post comment to {full_name} PR#{pr_number}:\n{comment[:200]}...")
 
-    # TODO: Uncomment when GitHub App token is available
-    # headers = {
-    #     "Authorization": f"token {github_token}",
-    #     "Accept": "application/vnd.github.v3+json",
-    # }
-    # url = f"https://api.github.com/repos/{full_name}/issues/{pr_number}/comments"
-    # async with httpx.AsyncClient() as client:
-    #     await client.post(url, json={"body": comment}, headers=headers)
+@router.post("/pr-review/{repo_id}")
+async def enable_pr_review(
+    repo_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Install the push + pull_request webhook so every PR gets an automatic review."""
+    repo = _owned_repo(db, repo_id, current_user)
+    token = _user_token_or_400(current_user)
+    if not settings.GITHUB_WEBHOOK_SECRET and settings.APP_ENV == "production":
+        raise HTTPException(
+            status_code=500,
+            detail="Server is missing GITHUB_WEBHOOK_SECRET — webhooks would be rejected.",
+        )
+    try:
+        hook = await pr_review_service.install_repo_webhook(
+            token, repo.full_name, _hook_url(request), WEBHOOK_SECRET
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"enabled": True, "hook_id": hook.get("id")}
+
+
+@router.delete("/pr-review/{repo_id}")
+async def disable_pr_review(
+    repo_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Remove the PR-review webhook from this repository."""
+    repo = _owned_repo(db, repo_id, current_user)
+    token = _user_token_or_400(current_user)
+    removed = await pr_review_service.remove_repo_webhook(token, repo.full_name, _hook_url(request))
+    return {"enabled": False, "removed": removed}
 
 
 # ── Scan Comparison / Diff API ─────────────────────────────────────────────────

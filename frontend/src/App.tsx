@@ -27,6 +27,11 @@ import ManualScanPage from "./pages/ManualScanPage.tsx";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage.tsx";
 import ResetPasswordPage from "./pages/ResetPasswordPage.tsx";
 import VerifyEmailPage from "./pages/VerifyEmailPage.tsx";
+import { wakeBackend } from "@/lib/api";
+
+// Wake the (possibly sleeping) free-tier backend as soon as the site loads,
+// so it's ready by the time the user returns from GitHub OAuth.
+void wakeBackend(20_000);
 
 const queryClient = new QueryClient({
   defaultOptions: {

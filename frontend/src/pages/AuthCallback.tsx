@@ -55,7 +55,7 @@ const AuthCallback = () => {
         <div>
           <h2 className="text-lg font-semibold">Authenticating with GitHub</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Please wait while we verify your credentials…
+            Please wait while we verify your credentials… (first login can take up to a minute while the server wakes up)
           </p>
         </div>
         <Loader2 className="w-5 h-5 animate-spin text-primary" />

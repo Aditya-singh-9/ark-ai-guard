@@ -38,28 +38,39 @@ async def close_client() -> None:
         _client = None
 
 
-async def exchange_code_for_token(code: str) -> Optional[str]:
+async def exchange_code_for_token(code: str, redirect_uri: Optional[str] = None) -> Optional[str]:
     """
     Exchange a GitHub OAuth authorization code for an access token.
 
     Args:
         code: The authorization code from GitHub's OAuth callback.
+        redirect_uri: The redirect_uri used in the authorize step. If omitted,
+            it is not sent (GitHub treats it as optional) — this avoids
+            `redirect_uri_mismatch` when the env default (localhost) differs
+            from the production domain.
 
     Returns:
         GitHub access token string, or None if the exchange fails.
     """
+    payload = {
+        "client_id": settings.GITHUB_CLIENT_ID,
+        "client_secret": settings.GITHUB_CLIENT_SECRET,
+        "code": code,
+    }
+    if redirect_uri:
+        payload["redirect_uri"] = redirect_uri
+
     client = get_client()
-    response = await client.post(
-        settings.GITHUB_TOKEN_URL,
-        data={
-            "client_id": settings.GITHUB_CLIENT_ID,
-            "client_secret": settings.GITHUB_CLIENT_SECRET,
-            "code": code,
-            "redirect_uri": settings.GITHUB_REDIRECT_URI,
-        },
-        headers={"Accept": "application/json"},
-        timeout=15.0,
-    )
+    try:
+        response = await client.post(
+            settings.GITHUB_TOKEN_URL,
+            data=payload,
+            headers={"Accept": "application/json"},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as exc:
+        log.error(f"GitHub token exchange network error: {exc}")
+        return None
 
     if response.status_code != 200:
         log.error(f"GitHub token exchange failed: {response.status_code} {response.text}")

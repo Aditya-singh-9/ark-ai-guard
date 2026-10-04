@@ -74,7 +74,13 @@ class RepoClonerService:
         import uuid
         return os.path.join(settings.SCAN_TEMP_DIR, f"scan-{scan_id}-{uuid.uuid4().hex[:8]}")
 
-    def clone_repository(self, clone_url: str, scan_id: int, access_token: str | None = None) -> str:
+    def clone_repository(
+        self,
+        clone_url: str,
+        scan_id: int,
+        access_token: str | None = None,
+        branch: str | None = None,
+    ) -> str:
         """
         Clone repository to a local temp directory.
 
@@ -103,6 +109,7 @@ class RepoClonerService:
             "--depth", "1",       # Shallow clone — only latest commit
             "--single-branch",
             "--no-tags",
+            *(["--branch", branch] if branch else []),
             auth_url,
             dest_path,
         ]

@@ -44,13 +44,13 @@ class TestConfig:
 
     def test_config_loads(self):
         from app.utils.config import settings
-        assert settings.APP_NAME == "ARK DevSecOps AI"
+        assert settings.APP_NAME == "DevScops Guard"
         assert settings.ALGORITHM == "HS256"
         assert settings.ACCESS_TOKEN_EXPIRE_MINUTES > 0
 
     def test_allowed_origins_has_frontend(self):
         from app.utils.config import settings
-        assert any("localhost" in o for o in settings.ALLOWED_ORIGINS)
+        assert any("localhost" in o for o in settings.allowed_origins_list)
 
 
 class TestVulnerabilityModel:

@@ -66,6 +66,8 @@ async def run_full_scan(
     repository: Repository,
     scan_report: ScanReport,
     access_token: str | None = None,
+    branch: str | None = None,
+    clone_url: str | None = None,
 ) -> ScanReport:
     """
     Execute the full Nexus Engine security scanning pipeline.
@@ -103,11 +105,13 @@ async def run_full_scan(
 
     try:
         # ── Step 1: Clone ────────────────────────────────────────────────
-        log.info(f"[Scan {scan_id}] Cloning {repository.clone_url or repository.url}")
+        source_url = clone_url or repository.clone_url or repository.url
+        log.info(f"[Scan {scan_id}] Cloning {source_url}" + (f" @ {branch}" if branch else ""))
         clone_path = repo_cloner.clone_repository(
-            clone_url=repository.clone_url or repository.url,
+            clone_url=source_url,
             scan_id=scan_id,
             access_token=access_token,
+            branch=branch,
         )
 
         # ── Step 2: Structure Analysis ───────────────────────────────────

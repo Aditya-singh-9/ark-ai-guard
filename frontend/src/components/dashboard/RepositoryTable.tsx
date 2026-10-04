@@ -5,12 +5,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Play, Eye, GitBranch, RefreshCw, Plus, Trash2, X,
   ExternalLink, Github, Lock, Globe, ChevronDown, Download,
-  CheckCircle, AlertTriangle, Shield,
+  CheckCircle, AlertTriangle, Shield, GitPullRequest,
 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getRepositories, connectRepository, deleteRepository, scanRepository,
   getScanStatus, listGithubRepos, Repository, GithubRepoItem,
+  getPrReviewStatus, enablePrReview, disablePrReview,
 } from "@/lib/api";
 import { toast } from "sonner";
 import { Link } from "react-router-dom";
@@ -48,6 +49,54 @@ const getStatusMeta = (status: string | null | undefined): { progress: number; l
     case "failed": return { progress: 100, label: "Failed", isRunning: false };
     default: return { progress: 0, label: "Never Scanned", isRunning: false };
   }
+};
+
+// ── PR Review toggle ──────────────────────────────────────────────────────────
+
+const PrReviewToggle = ({ repo }: { repo: Repository }) => {
+  const queryClient = useQueryClient();
+  const key = ["pr-review", repo.id];
+  const { data, isLoading } = useQuery({
+    queryKey: key,
+    queryFn: () => getPrReviewStatus(repo.id),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const enabled = !!data?.enabled;
+
+  const mutation = useMutation({
+    mutationFn: () => (enabled ? disablePrReview(repo.id) : enablePrReview(repo.id)),
+    onSuccess: (res) => {
+      queryClient.setQueryData(key, res);
+      toast.success(
+        res.enabled
+          ? `PR reviews enabled for ${repo.name}: new PRs get inline security comments.`
+          : `PR reviews disabled for ${repo.name}.`
+      );
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  if (data?.reason === "github_not_connected") return null;
+
+  return (
+    <Button
+      id={`pr-review-toggle-${repo.id}`}
+      variant="ghost"
+      size="sm"
+      title={enabled
+        ? "Automatic PR reviews are ON. Click to turn off."
+        : "Post security findings as inline comments on every pull request"}
+      className={`h-8 text-xs gap-1.5 ${enabled ? "text-neon-green hover:text-neon-green bg-neon-green/10" : ""}`}
+      onClick={() => mutation.mutate()}
+      disabled={isLoading || mutation.isPending}
+    >
+      {mutation.isPending
+        ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+        : <GitPullRequest className="w-3.5 h-3.5" />}
+      {enabled ? "PR Review On" : "PR Review"}
+    </Button>
+  );
 };
 
 // ── Row-level scan tracker ─────────────────────────────────────────────────────
@@ -194,6 +243,7 @@ const RepoRow = ({
               <Eye className="w-3.5 h-3.5" /> Report
             </Button>
           </Link>
+          <PrReviewToggle repo={repo} />
           <Button
             variant="ghost"
             size="sm"

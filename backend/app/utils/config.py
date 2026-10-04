@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     # ── GitHub Webhooks & Data API ───────────────────────────────────────
     GITHUB_WEBHOOK_SECRET: str = ""    # HMAC-SHA256 secret for webhook verification
     GITHUB_PAT: str = ""               # Personal Access Token for creating Auto-Fix PRs
+    # Public HTTPS URL of this backend (e.g. https://ark-ai-guard.onrender.com).
+    # Used to register repo webhooks for PR reviews. Falls back to the request host.
+    BACKEND_PUBLIC_URL: str = ""
 
     # ── Scanning ─────────────────────────────────────────────────────────────
     SCAN_TEMP_DIR: str = "/tmp/ark-scans"

@@ -43,6 +43,9 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/github", auto_error=False)
 
 class GitHubCodeRequest(BaseModel):
     code: str
+    # The redirect_uri the frontend used in the /authorize step. GitHub requires
+    # the token-exchange redirect_uri (if sent) to match it exactly.
+    redirect_uri: str | None = None
 
 
 class TokenResponse(BaseModel):
@@ -199,7 +202,7 @@ async def github_login(request: Request, body: GitHubCodeRequest, db: Session = 
     The frontend then calls this endpoint with the code.
     """
     # 1. Exchange code for GitHub token
-    gh_token = await github_service.exchange_code_for_token(body.code)
+    gh_token = await github_service.exchange_code_for_token(body.code, body.redirect_uri)
     if not gh_token:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
